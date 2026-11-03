@@ -21,12 +21,13 @@ import asyncio
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter, Header, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.lidar.config import LidarConfig, lidar_schema
 from src.lidar.manager import LidarError, StreamProfile
+from src.server.roles import AuthError, admin_token_ok
 from src.server.route_utils import on_sim_thread
 
 logger = logging.getLogger(__name__)
@@ -165,9 +166,11 @@ async def join_server(req: JoinRequest, request: Request):
 
 
 @router.delete("/client/leave/{session_id}", summary="Leave the server")
-async def leave_server(session_id: str):
+async def leave_server(session_id: str, x_session_token: Optional[str] = Header(default=None),
+                       x_admin_token: Optional[str] = Header(default=None)):
     """Gracefully end a session and despawn the leading vehicle."""
     _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     session = _world.sessions.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -178,9 +181,11 @@ async def leave_server(session_id: str):
 
 
 @router.get("/client/vehicle/{session_id}", summary="Get vehicle telemetry (REST)")
-async def get_vehicle_state(session_id: str):
+async def get_vehicle_state(session_id: str, x_session_token: Optional[str] = Header(default=None),
+                            x_admin_token: Optional[str] = Header(default=None)):
     """One-shot telemetry poll (for clients that can't use WebSocket)."""
     _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     session = _world.sessions.get_session(session_id)
     if session is None or not session.is_active:
         raise HTTPException(status_code=404, detail="Session not found or ended")
@@ -231,6 +236,13 @@ async def client_websocket(websocket: WebSocket, session_id: str):
     if session is None or not session.is_active:
         await websocket.send_json({"type": "error", "message": "Invalid or expired session"})
         await websocket.close()
+        return
+
+    try:
+        _check_session_access(session_id, websocket.headers.get("x-session-token"), websocket.headers.get("x-admin-token"))
+    except HTTPException:
+        await websocket.send_json({"type": "error", "message": "X-Session-Token required"})
+        await websocket.close(code=4401)
         return
 
     _world.sessions.mark_connected(session_id)
@@ -309,6 +321,21 @@ async def _client_ws_closed(session_id: str) -> None:
 # LiDAR on request — REST                                             #
 # ------------------------------------------------------------------ #
 
+def _check_session_access(session_id: str, session_token: Optional[str], admin_token: Optional[str]) -> None:
+    """With ``client_routes_require_token`` the session id alone is not enough: send this session's ``X-Session-Token`` (or the
+    admin token). Off by default so existing scripts keep working; switch on with PATCH /api/config."""
+    if _world is None or not getattr(_world, "client_routes_require_token", False):
+        return
+    try:
+        if admin_token is not None and admin_token_ok(admin_token):
+            return
+    except AuthError:
+        pass
+    session = _world.sessions.get_by_token(session_token) if isinstance(session_token, str) else None
+    if session is None or session.session_id != session_id:
+        raise HTTPException(status_code=401, detail="this server requires the X-Session-Token of the session (or the admin token)")
+
+
 def _lidar_error_response(exc: LidarError) -> JSONResponse:
     return JSONResponse(status_code=exc.status, content=exc.detail)
 
@@ -327,7 +354,10 @@ async def lidar_schema_endpoint():
 
 
 @router.get("/client/lidar/{session_id}", summary="State of this session's LiDAR sensor")
-async def get_lidar(session_id: str):
+async def get_lidar(session_id: str, x_session_token: Optional[str] = Header(default=None),
+                    x_admin_token: Optional[str] = Header(default=None)):
+    _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     _active_session(session_id)
     if _world.lidar is None:
         raise HTTPException(status_code=503, detail="LiDAR is not available")
@@ -336,7 +366,10 @@ async def get_lidar(session_id: str):
 
 @router.put("/client/lidar/{session_id}", status_code=202,
             summary="Request or reconfigure this session's LiDAR (applied at the next tick boundary)")
-async def put_lidar(session_id: str, config: LidarConfig = LidarConfig()):
+async def put_lidar(session_id: str, config: LidarConfig = LidarConfig(), x_session_token: Optional[str] = Header(default=None),
+                    x_admin_token: Optional[str] = Header(default=None)):
+    _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     session = _active_session(session_id)
     try:
         info = await on_sim_thread(_world, _world.enable_client_lidar, session_id, config)
@@ -347,7 +380,10 @@ async def put_lidar(session_id: str, config: LidarConfig = LidarConfig()):
 
 
 @router.delete("/client/lidar/{session_id}", status_code=202, summary="Release this session's LiDAR")
-async def delete_lidar(session_id: str):
+async def delete_lidar(session_id: str, x_session_token: Optional[str] = Header(default=None),
+                       x_admin_token: Optional[str] = Header(default=None)):
+    _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     session = _active_session(session_id)
     try:
         removed = await on_sim_thread(_world, _world.disable_client_lidar, session_id)

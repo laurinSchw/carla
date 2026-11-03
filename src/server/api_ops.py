@@ -62,6 +62,10 @@ class ApiOpsMixin:
     def observer_public(self) -> bool:
         return self.config.observer_public
 
+    @property
+    def client_routes_require_token(self) -> bool:
+        return self.config.client_routes_require_token
+
     # -- RSUs --------------------------------------------------------------------------------------
     def set_rsu(self, station_id: int, enabled: Optional[bool] = None, tx_power_dbm: Optional[float] = None) -> dict:
         """``station_id`` is the negative id shown in the world state (``-intersection_id``)."""

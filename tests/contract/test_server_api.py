@@ -580,3 +580,23 @@ def test_shutdown_stops_the_world_so_runs_are_closed_and_carla_is_released(world
     with TestClient(app_mod.app):
         assert world.stopped is False
     assert world.stopped is True
+
+
+def test_client_routes_need_the_session_token_only_when_the_setting_is_on(client, world):
+    j = _join(client).json()
+    sid, tok = j["session_id"], j["session_token"]
+    assert client.get(f"/client/vehicle/{sid}").status_code in (200, 404)      # off (default): the id alone works
+    world.client_routes_require_token = True
+    for method, url in (("get", f"/client/vehicle/{sid}"), ("get", f"/client/lidar/{sid}"),
+                        ("put", f"/client/lidar/{sid}"), ("delete", f"/client/lidar/{sid}"), ("delete", f"/client/leave/{sid}")):
+        assert getattr(client, method)(url).status_code == 401, url
+        assert getattr(client, method)(url, headers={"X-Session-Token": "wrong"}).status_code == 401
+    other = _join(client, name="car-2").json()
+    assert client.delete(f"/client/leave/{sid}", headers={"X-Session-Token": other["session_token"]}).status_code == 401
+    with pytest.raises(Exception):
+        with client.websocket_connect(f"/ws/client/{sid}") as ws:
+            assert ws.receive_json()["type"] == "error"
+            ws.receive_json()
+    assert client.get(f"/client/vehicle/{sid}", headers={"X-Session-Token": tok}).status_code in (200, 404)
+    assert client.get(f"/client/vehicle/{sid}", headers=AUTH).status_code in (200, 404)           # admin token also works
+    assert client.delete(f"/client/leave/{sid}", headers={"X-Session-Token": tok}).status_code == 200
