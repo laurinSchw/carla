@@ -636,7 +636,7 @@ class PersistentCARLAServer:
         def _safe_ttc(ttc: float) -> Optional[float]:
             return None if not math.isfinite(ttc) else round(ttc, 2)
 
-        vx, vy = bsm.latitude, bsm.longitude  # CARLA x/y stored in lat/lon fields
+        vx, vy = bsm.x_m, bsm.y_m  # CARLA world x/y, metres
         neighbors = self.v2x_network.get_neighbors(vid)
         threats = self.v2x_network.get_threats(vid)
 
@@ -682,9 +682,9 @@ class PersistentCARLAServer:
                 "speed": round(bsm.speed, 2),
                 "heading": round(bsm.heading, 1),
                 "position": {
-                    "x": round(bsm.latitude, 2),
-                    "y": round(bsm.longitude, 2),
-                    "z": round(bsm.elevation, 2),
+                    "x": round(bsm.x_m, 2),
+                    "y": round(bsm.y_m, 2),
+                    "z": round(bsm.z_m, 2),
                 },
             },
             "neighbors": [

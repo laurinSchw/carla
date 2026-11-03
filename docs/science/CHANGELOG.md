@@ -132,3 +132,8 @@ When CARLA's phase timers could not be read, `RoadSideUnit` emitted `remaining =
 window. Now `min_end_time_s`, `max_end_time_s`, `likely_time_s` are `None` (admin route and
 `get_vehicle_v2x_data` already pass `None` through; the admin route's min/max rounding was made None-safe).
 - Before: unreadable timer → likely end = now + 5.0 s. After: `null`.
+
+### S8 — BSM position fields renamed `latitude/longitude/elevation` → `x_m/y_m/z_m`
+They always held CARLA world x/y/z in metres, never geodetic degrees. Pure rename, bit-identical values
+(golden BSM files: only the keys changed). No geodetic output exists; add one separately with
+`world.get_map().transform_to_geolocation()` if needed.

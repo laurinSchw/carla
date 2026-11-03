@@ -17,7 +17,7 @@ Standards:
       Basic Service (VRUAM) — pedestrians, cyclists, motorcyclists.
 
 Note: All position fields carry CARLA world (x, y, z) coordinates, not
-geodetic degrees — consistent with BSMCore.latitude/longitude convention.
+geodetic degrees — consistent with the BSMCore x_m / y_m / z_m fields.
 
 Vocabs : 
     - Intelligent Transport System Station (ITS-S) — any device capable of V2X communication, including vehicles, roadside units, and vulnerable road users (pedestrians, cyclists).

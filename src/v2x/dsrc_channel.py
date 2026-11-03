@@ -122,7 +122,7 @@ class DSRCChannel:
     Usage inside V2XNetwork.update():
 
         positions = {
-            vid: (bsm.latitude, bsm.longitude)
+            vid: (bsm.x_m, bsm.y_m)
             for vid, bsm in self.bsm_messages.items()
         }
         self._dsrc_channel.broadcast_all(self.bsm_messages, positions)
@@ -176,7 +176,7 @@ class DSRCChannel:
         Args:
             bsm_messages: Current BSMCore per registered vehicle.
             positions: {vehicle_id: (x_m, y_m)} in CARLA world space.
-                       Typically derived from bsm.latitude / bsm.longitude,
+                       Typically derived from bsm.x_m / bsm.y_m (CARLA metres),
                        which store CARLA world coordinates (not geodetic).
 
         Call once per V2V update tick. Results are stable until the next call.

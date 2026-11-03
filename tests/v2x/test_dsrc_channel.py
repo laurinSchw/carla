@@ -30,15 +30,15 @@ from src.v2x import V2XNetwork
 # ── Test helpers ───────────────────────────────────────────────────────────────
 
 def _bsm(vehicle_id: int, x: float = 0.0, y: float = 0.0, speed: float = 10.0) -> BSMCore:
-    """Minimal BSMCore for channel tests; x/y stored in latitude/longitude."""
+    """Minimal BSMCore for channel tests; x/y stored in x_m/y_m."""
     return BSMCore(
         timestamp=1000.0,
         msg_count=0,
         vehicle_id=vehicle_id,
         vehicle_type=VehicleType.PASSENGER_CAR,
-        latitude=x,
-        longitude=y,
-        elevation=0.0,
+        x_m=x,
+        y_m=y,
+        z_m=0.0,
         position_accuracy=0.5,
         speed=speed,
         heading=0.0,
@@ -260,7 +260,7 @@ class TestDSRCChannelBroadcast(unittest.TestCase):
         """
         channel = self._clear_channel()
         bsms = {0: _bsm(0, x=0.0, y=0.0), 1: _bsm(1, x=0.0, y=0.0)}
-        positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
+        positions = {vid: (b.x_m, b.y_m) for vid, b in bsms.items()}
 
         channel.broadcast_all(bsms, positions)
 
@@ -271,7 +271,7 @@ class TestDSRCChannelBroadcast(unittest.TestCase):
         """A vehicle must never receive its own BSM."""
         channel = self._clear_channel()
         bsms = {0: _bsm(0, x=0.0, y=0.0), 1: _bsm(1, x=10.0, y=0.0)}
-        positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
+        positions = {vid: (b.x_m, b.y_m) for vid, b in bsms.items()}
 
         channel.broadcast_all(bsms, positions)
 
@@ -284,7 +284,7 @@ class TestDSRCChannelBroadcast(unittest.TestCase):
         other's BSM (PRR ≈ 1.0 at 10 m from design).
         """
         bsms = {0: _bsm(0, x=0.0, y=0.0), 1: _bsm(1, x=10.0, y=0.0)}
-        positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
+        positions = {vid: (b.x_m, b.y_m) for vid, b in bsms.items()}
 
         # Run 20 trials; at PRR ≈ 1.0 all should succeed
         successes = 0
@@ -320,7 +320,7 @@ class TestDSRCChannelBroadcast(unittest.TestCase):
         """Results from a previous tick must not bleed into the next."""
         channel = self._clear_channel()
         bsms = {0: _bsm(0, x=0.0, y=0.0), 1: _bsm(1, x=0.0, y=0.0)}
-        positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
+        positions = {vid: (b.x_m, b.y_m) for vid, b in bsms.items()}
 
         channel.broadcast_all(bsms, positions)
         # Second call with empty network — previous results must be gone
@@ -346,7 +346,7 @@ class TestDSRCChannelStats(unittest.TestCase):
         channel = DSRCChannel(cfg)
         n = 4
         bsms = {i: _bsm(i, x=float(i * 5)) for i in range(n)}
-        positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
+        positions = {vid: (b.x_m, b.y_m) for vid, b in bsms.items()}
 
         channel.broadcast_all(bsms, positions)
 
@@ -360,7 +360,7 @@ class TestDSRCChannelStats(unittest.TestCase):
         cfg = DSRCConfig(random_seed=42)
         channel = DSRCChannel(cfg)
         bsms = {i: _bsm(i, x=float(i * 30)) for i in range(3)}
-        positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
+        positions = {vid: (b.x_m, b.y_m) for vid, b in bsms.items()}
 
         channel.broadcast_all(bsms, positions)
         s = channel.stats
@@ -373,7 +373,7 @@ class TestDSRCChannelStats(unittest.TestCase):
         cfg = DSRCConfig(random_seed=7)
         channel = DSRCChannel(cfg)
         bsms = {i: _bsm(i, x=float(i * 20)) for i in range(5)}
-        positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
+        positions = {vid: (b.x_m, b.y_m) for vid, b in bsms.items()}
         channel.broadcast_all(bsms, positions)
 
         prr = channel.stats["prr"]
@@ -395,7 +395,7 @@ class TestDSRCChannelDeterminism(unittest.TestCase):
     def test_same_seed_same_results(self):
         """Two channels with the same seed must produce identical delivery maps."""
         bsms = {i: _bsm(i, x=float(i * 40)) for i in range(4)}
-        positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
+        positions = {vid: (b.x_m, b.y_m) for vid, b in bsms.items()}
 
         ch1 = DSRCChannel(DSRCConfig(random_seed=123))
         ch2 = DSRCChannel(DSRCConfig(random_seed=123))
@@ -413,7 +413,7 @@ class TestDSRCChannelDeterminism(unittest.TestCase):
     def test_different_seeds_may_differ(self):
         """Different seeds should (with overwhelming probability) produce different results."""
         bsms = {i: _bsm(i, x=float(i * 80)) for i in range(5)}
-        positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
+        positions = {vid: (b.x_m, b.y_m) for vid, b in bsms.items()}
 
         ch1 = DSRCChannel(DSRCConfig(random_seed=1))
         ch2 = DSRCChannel(DSRCConfig(random_seed=999))

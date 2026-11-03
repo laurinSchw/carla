@@ -21,7 +21,7 @@ def _bsm(vid: int, x: float, y: float) -> BSMCore:
     return BSMCore(
         timestamp=1000.0, msg_count=0, vehicle_id=vid,
         vehicle_type=VehicleType.PASSENGER_CAR,
-        latitude=x, longitude=y, elevation=0.0, position_accuracy=0.5,
+        x_m=x, y_m=y, z_m=0.0, position_accuracy=0.5,
         speed=10.0, heading=0.0, steering_angle=0.0, longitudinal_accel=0.0,
         lateral_accel=0.0, vertical_accel=0.0, yaw_rate=0.0,
         vehicle_length=4.5, vehicle_width=1.8, vehicle_height=1.5,

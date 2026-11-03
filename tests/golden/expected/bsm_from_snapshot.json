@@ -2,11 +2,8 @@
  "brake_confidence": 100.0,
  "brake_pressure": 0.0,
  "brake_status": 1,
- "elevation": 0.5,
  "heading": 225.0,
  "lateral_accel": 9.033623291419591,
- "latitude": 120.5,
- "longitude": -33.25,
  "longitudinal_accel": 2.0,
  "msg_count": 2,
  "position_accuracy": 0.5,
@@ -22,5 +19,8 @@
  "vehicle_type": 0,
  "vehicle_width": 1.8,
  "vertical_accel": 0.0,
- "yaw_rate": 0.5
+ "x_m": 120.5,
+ "y_m": -33.25,
+ "yaw_rate": 0.5,
+ "z_m": 0.5
 }

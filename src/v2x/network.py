@@ -230,10 +230,9 @@ class V2XNetwork:
             self.prev_speeds[vehicle_id] = bsm.speed
 
         # ── Phase 2: Run DSRC/WAVE channel model ─────────────────────────────
-        # Positions come from bsm.latitude/longitude which carry CARLA world
-        # X/Y coordinates (not geodetic degrees — see create_bsm_from_carla).
+        # Positions come from bsm.x_m / bsm.y_m: CARLA world X/Y in metres, not geodetic degrees.
         positions: Dict[int, Tuple[float, float]] = {
-            vid: (bsm.latitude, bsm.longitude)
+            vid: (bsm.x_m, bsm.y_m)
             for vid, bsm in self.bsm_messages.items()
         }
         self._dsrc_channel.broadcast_all(self.bsm_messages, positions)
@@ -314,8 +313,8 @@ class V2XNetwork:
                 if not bsm2:
                     continue
 
-                dx = bsm2.latitude - bsm1.latitude
-                dy = bsm2.longitude - bsm1.longitude
+                dx = bsm2.x_m - bsm1.x_m
+                dy = bsm2.y_m - bsm1.y_m
                 distance = math.sqrt(dx * dx + dy * dy)
 
                 # Always record geometric distance for APIs / stats

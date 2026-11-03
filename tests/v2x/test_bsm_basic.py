@@ -180,8 +180,8 @@ class TestV2VBasics(unittest.TestCase):
         bsm = v2v.get_bsm(1)
         self.assertIsNotNone(bsm)
         self.assertEqual(bsm.vehicle_id, 1)
-        self.assertEqual(bsm.latitude, 100)
-        self.assertEqual(bsm.longitude, 50)
+        self.assertEqual(bsm.x_m, 100)
+        self.assertEqual(bsm.y_m, 50)
     
     def test_neighbor_discovery(self):
         """Test neighbor discovery within range"""

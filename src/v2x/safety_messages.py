@@ -127,9 +127,9 @@ class BSMCore:
     vehicle_type: VehicleType = VehicleType.PASSENGER_CAR
     
     # Position (WGS84 or local coordinate system)
-    latitude: float = 0.0  # or X in local coords
-    longitude: float = 0.0  # or Y in local coords
-    elevation: float = 0.0  # or Z in local coords
+    x_m: float = 0.0  # CARLA world X, metres (was "latitude"; handoff S8)
+    y_m: float = 0.0  # CARLA world Y, metres (was "longitude")
+    z_m: float = 0.0  # CARLA world Z, metres (was "elevation")
     
     # Position accuracy (meters)
     position_accuracy: float = 1.0
@@ -254,8 +254,8 @@ def calculate_threat_level(ego_bsm: BSMCore, other_bsm: BSMCore) -> tuple:
         threat_level: 0=no threat, 1=low, 2=medium, 3=high, 4=imminent
     """
     # Calculate distance
-    dx = other_bsm.latitude - ego_bsm.latitude
-    dy = other_bsm.longitude - ego_bsm.longitude
+    dx = other_bsm.x_m - ego_bsm.x_m
+    dy = other_bsm.y_m - ego_bsm.y_m
     distance = math.sqrt(dx**2 + dy**2)
     
     # Calculate relative velocity
@@ -401,9 +401,9 @@ def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int,
         msg_count=msg_count % 128,
         vehicle_id=vehicle_id,
         vehicle_type=_vehicle_type_from_actor(vehicle),
-        latitude=transform.location.x,
-        longitude=transform.location.y,
-        elevation=transform.location.z,
+        x_m=transform.location.x,
+        y_m=transform.location.y,
+        z_m=transform.location.z,
         position_accuracy=0.5,  # Assuming high accuracy in simulation
         speed=speed_ms,
         heading=transform.rotation.yaw % 360,
@@ -493,7 +493,7 @@ def create_cam_from_bsm(bsm: 'BSMCore') -> 'CooperativeAwarenessMessage':
     return CooperativeAwarenessMessage(
         station_id=bsm.vehicle_id,
         generation_time=bsm.timestamp,
-        reference_position=(bsm.latitude, bsm.longitude, bsm.elevation),
+        reference_position=(bsm.x_m, bsm.y_m, bsm.z_m),
         heading=bsm.heading,
         speed=bsm.speed,
         drive_direction=direction,

@@ -135,16 +135,16 @@ class MockWorld:
 
 class TestScientificIntegrity(unittest.TestCase):
     def test_ttc_receding_vehicle_is_not_threat(self):
-        ego = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=1, latitude=0.0, longitude=0.0, speed=10.0, heading=0.0)
-        other = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=2, latitude=20.0, longitude=0.0, speed=20.0, heading=0.0)
+        ego = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=1, x_m=0.0, y_m=0.0, speed=10.0, heading=0.0)
+        other = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=2, x_m=20.0, y_m=0.0, speed=20.0, heading=0.0)
 
         level, ttc, _ = calculate_threat_level(ego, other)
         self.assertEqual(level, 0)
         self.assertEqual(ttc, float('inf'))
 
     def test_ttc_converging_vehicle_is_finite(self):
-        ego = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=1, latitude=0.0, longitude=0.0, speed=20.0, heading=0.0)
-        other = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=2, latitude=100.0, longitude=0.0, speed=20.0, heading=180.0)
+        ego = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=1, x_m=0.0, y_m=0.0, speed=20.0, heading=0.0)
+        other = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=2, x_m=100.0, y_m=0.0, speed=20.0, heading=180.0)
 
         level, ttc, distance = calculate_threat_level(ego, other)
         self.assertGreater(distance, 0.0)
@@ -153,36 +153,36 @@ class TestScientificIntegrity(unittest.TestCase):
 
     def test_threat_level_thresholds(self):
         """Threat classification should follow TTC threshold bands."""
-        ego = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=1, latitude=0.0, longitude=0.0, speed=0.0, heading=0.0)
+        ego = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=1, x_m=0.0, y_m=0.0, speed=0.0, heading=0.0)
 
         # TTC > 10s with distance <= 100m -> level 1
-        other_l1 = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=2, latitude=95.0, longitude=0.0, speed=7.0, heading=180.0)
+        other_l1 = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=2, x_m=95.0, y_m=0.0, speed=7.0, heading=180.0)
         l1, ttc1, _ = calculate_threat_level(ego, other_l1)
         self.assertGreater(ttc1, 10.0)
         self.assertEqual(l1, 1)
 
         # TTC = 7s -> level 2
-        other_l2 = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=3, latitude=70.0, longitude=0.0, speed=10.0, heading=180.0)
+        other_l2 = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=3, x_m=70.0, y_m=0.0, speed=10.0, heading=180.0)
         l2, ttc2, _ = calculate_threat_level(ego, other_l2)
         self.assertTrue(5.0 < ttc2 <= 10.0)
         self.assertEqual(l2, 2)
 
         # TTC = 3s -> level 3
-        other_l3 = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=4, latitude=30.0, longitude=0.0, speed=10.0, heading=180.0)
+        other_l3 = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=4, x_m=30.0, y_m=0.0, speed=10.0, heading=180.0)
         l3, ttc3, _ = calculate_threat_level(ego, other_l3)
         self.assertTrue(2.0 < ttc3 <= 5.0)
         self.assertEqual(l3, 3)
 
         # TTC = 1s -> level 4
-        other_l4 = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=5, latitude=10.0, longitude=0.0, speed=10.0, heading=180.0)
+        other_l4 = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=5, x_m=10.0, y_m=0.0, speed=10.0, heading=180.0)
         l4, ttc4, _ = calculate_threat_level(ego, other_l4)
         self.assertTrue(ttc4 <= 2.0)
         self.assertEqual(l4, 4)
 
     def test_zero_distance_returns_imminent_collision(self):
         """Zero-distance pairs should be classified as imminent, not crash the model."""
-        ego = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=1, latitude=10.0, longitude=10.0, speed=0.0, heading=0.0)
-        other = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=2, latitude=10.0, longitude=10.0, speed=0.0, heading=0.0)
+        ego = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=1, x_m=10.0, y_m=10.0, speed=0.0, heading=0.0)
+        other = BSMCore(timestamp=0.0, msg_count=0, vehicle_id=2, x_m=10.0, y_m=10.0, speed=0.0, heading=0.0)
 
         level, ttc, distance = calculate_threat_level(ego, other)
         self.assertEqual(distance, 0.0)
@@ -196,8 +196,8 @@ class TestScientificIntegrity(unittest.TestCase):
 
         bsm = create_bsm_from_carla(vehicle, vehicle_id=1, msg_count=3, snapshot=empty_snapshot, prev_velocity=6.0, delta_time=0.5)
         self.assertEqual(bsm.vehicle_id, 1)
-        self.assertAlmostEqual(bsm.latitude, 12.0)
-        self.assertAlmostEqual(bsm.longitude, 6.0)
+        self.assertAlmostEqual(bsm.x_m, 12.0)
+        self.assertAlmostEqual(bsm.y_m, 6.0)
         self.assertGreaterEqual(bsm.speed, 0.0)
 
     def test_bsm_uses_snapshot_time_and_transform(self):
@@ -208,8 +208,8 @@ class TestScientificIntegrity(unittest.TestCase):
         bsm = create_bsm_from_carla(vehicle, vehicle_id=1, msg_count=7, snapshot=snapshot, prev_velocity=0.0, delta_time=0.5)
 
         self.assertAlmostEqual(bsm.timestamp, 42.5)
-        self.assertAlmostEqual(bsm.latitude, 123.0)
-        self.assertAlmostEqual(bsm.longitude, 45.0)
+        self.assertAlmostEqual(bsm.x_m, 123.0)
+        self.assertAlmostEqual(bsm.y_m, 45.0)
         self.assertAlmostEqual(bsm.heading, 10.0)
 
     def test_neighbor_distance_refreshes_each_update(self):
