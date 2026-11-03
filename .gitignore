@@ -14,6 +14,7 @@ build/
 
 # CARLA Data
 data/
+!tests/golden/data/
 FrameWorksV2v/
 *.npy
 *.ply
