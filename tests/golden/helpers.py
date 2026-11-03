@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-GOLDEN_DIR = Path(__file__).parent / "data"
+GOLDEN_DIR = Path(__file__).parent / "expected"
 
 
 def assert_matches_golden(name: str, actual) -> None:

@@ -16,10 +16,9 @@ Coverage:
 """
 
 import sys
-import math
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -27,7 +26,7 @@ from src.v2x.messages import (
     VRUProfile, ObjectClassification,
     MAPMessage, MAPLane,
     SPATMessage, SPATMovementState,
-    PerceivedObject, SensorInfo, CPMMessage,
+    PerceivedObject, CPMMessage,
     VRUAwarenessMessage,
 )
 from src.v2x.rsu import RSUConfig, RoadSideUnit

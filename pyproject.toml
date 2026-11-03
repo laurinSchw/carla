@@ -1,0 +1,32 @@
+[project]
+name = "carla-v2x-server"
+version = "0.0.0"
+description = "CARLA V2X + LiDAR research server"
+requires-python = ">=3.10"
+dependencies = [
+    "carla==0.9.16",
+    "numpy>=1.24",
+    "fastapi>=0.104",
+    "uvicorn[standard]>=0.24",
+    "websockets>=12",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "httpx>=0.25", "ruff", "pyright", "pre-commit"]
+analysis = ["pandas>=2", "matplotlib>=3.7"]
+
+[tool.setuptools]
+packages = []  # not installable as a package yet (src/ layout comes with the package restructuring)
+
+[tool.ruff]
+target-version = "py310"
+extend-exclude = ["runs"]
+
+[tool.ruff.lint]
+# Conservative on purpose: real errors only (syntax errors, undefined names, unused code).
+# Widen (E, W, I, B, UP) as the code is restructured.
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]

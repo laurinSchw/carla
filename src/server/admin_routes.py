@@ -1,3 +1,5 @@
+# TODO: CARLA handles / the module-global world are Optional until a connected-world type exists (WorldController state machine)
+# pyright: reportOptionalMemberAccess=false
 """
 Admin-only FastAPI router.
 
@@ -16,7 +18,10 @@ import threading
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Header, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
+
+from src.server.route_utils import on_sim_thread
+from src.server.world_config import WorldConfig
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +29,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 # Injected once at startup by start_server.py
 _world = None
+_connect_lock = threading.Lock()
+_connect_state = "idle"  # idle | connecting | running | error
+_connect_error: Optional[str] = None
 _server_module = None  # reference back to server.app for set_persistent_world propagation
 
 
@@ -89,8 +97,11 @@ async def admin_status():
             "rsu_count": 0,
             "vru_count": 0,
             "map": None,
+            "connect_state": _connect_state,
+            "connect_error": _connect_error,
         }
-    return {**_world.get_status(), "connected": True}
+    return {**_world.get_status(), "connected": True,
+            "connect_state": _connect_state, "connect_error": _connect_error}
 
 
 @router.post("/connect", summary="Connect to CARLA and start world", dependencies=[Depends(_require_admin)])
@@ -100,34 +111,54 @@ async def connect_world(req: ConnectRequest):
 
     Call this from the admin panel to connect to a CARLA server at any IP.
     Safe to call again if the world is already running — stops the old one first.
+    A second request while a connect is in progress is rejected with 409.
     """
-    global _world
-
-    def _start():
-        global _world
-        from src.server.persistent_world import PersistentCARLAServer
-        # Stop previous world if any
-        if _world is not None:
-            try:
-                _world.stop()
-            except Exception as e:
-                logger.warning("Error stopping previous world: %s", e)
-
-        world = PersistentCARLAServer(
+    try:
+        config = WorldConfig(
             host=req.carla_host,
             port=req.carla_port,
             v2x_enabled=req.v2x_enabled,
-            v2x_range=req.v2x_range,
+            v2x_range_m=req.v2x_range,
             tm_port=req.tm_port,
         )
-        world.start()
-        _world = world
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False, include_context=False))
 
-        # Propagate to client routes and lidar server
-        if _server_module is not None:
-            _server_module.set_persistent_world(world)
+    global _connect_state, _connect_error
+    with _connect_lock:
+        if _connect_state == "connecting":
+            raise HTTPException(status_code=409, detail="A connect is already in progress")
+        _connect_state, _connect_error = "connecting", None
 
-        logger.info("Persistent world started via admin /connect (%s:%s)", req.carla_host, req.carla_port)
+    def _start():
+        global _world, _connect_state, _connect_error
+        from src.server.persistent_world import PersistentCARLAServer
+        try:
+            # Stop previous world if any
+            if _world is not None:
+                try:
+                    _world.stop()
+                except Exception as e:
+                    logger.warning("Error stopping previous world: %s", e)
+
+            world = PersistentCARLAServer(config)
+            try:
+                world.start()
+            except BaseException:
+                world.stop()  # release whatever start() got as far as creating
+                raise
+            _world = world
+
+            # Propagate to client routes
+            if _server_module is not None:
+                _server_module.set_persistent_world(world)
+
+            _connect_state = "running"
+            logger.info("Persistent world started via admin /connect (%s:%s)", req.carla_host, req.carla_port)
+        except Exception as exc:
+            logger.error("Connect to CARLA %s:%s failed: %s", req.carla_host, req.carla_port, exc)
+            _connect_error = f"{type(exc).__name__}: {exc}"
+            _connect_state = "error"
 
     threading.Thread(target=_start, daemon=True, name="admin-connect").start()
     return {
@@ -152,7 +183,7 @@ async def kick_session(session_id: str):
     session = _world.sessions.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    _world.despawn_client_vehicle(session_id)
+    await on_sim_thread(_world, _world.despawn_client_vehicle, session_id)
     _world.sessions.end_session(session_id)
     return {"ok": True, "kicked": session_id}
 
@@ -162,7 +193,7 @@ async def spawn_traffic(req: TrafficRequest):
     """Spawn autopilot background vehicles."""
     _assert_ready()
     _assert_running()
-    spawned = _world.spawn_background_traffic(req.count)
+    spawned = await on_sim_thread(_world, _world.spawn_background_traffic, req.count)
     return {"requested": req.count, "spawned": spawned}
 
 
@@ -171,7 +202,7 @@ async def clear_traffic():
     """Destroy all admin-spawned background vehicles. Returns 0 when world not started."""
     if _world is None:
         return {"removed": 0}
-    removed = _world.despawn_background_traffic()
+    removed = await on_sim_thread(_world, _world.despawn_background_traffic)
     return {"removed": removed}
 
 
@@ -180,7 +211,7 @@ async def spawn_pedestrians(req: PedestrianRequest):
     """Spawn AI-controlled pedestrians."""
     _assert_ready()
     _assert_running()
-    spawned = _world.spawn_pedestrians(req.count)
+    spawned = await on_sim_thread(_world, _world.spawn_pedestrians, req.count)
     return {"requested": req.count, "spawned": spawned}
 
 
@@ -189,7 +220,7 @@ async def clear_pedestrians():
     """Destroy all admin-spawned pedestrians. Returns 0 when world not started."""
     if _world is None:
         return {"removed": 0}
-    removed = _world.despawn_pedestrians()
+    removed = await on_sim_thread(_world, _world.despawn_pedestrians)
     return {"removed": removed}
 
 

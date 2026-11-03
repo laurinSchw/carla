@@ -1,3 +1,5 @@
+# TODO: CARLA handles / the module-global world are Optional until a connected-world type exists (WorldController state machine)
+# pyright: reportOptionalMemberAccess=false
 """
 Client-facing FastAPI router.
 
@@ -15,16 +17,20 @@ Mount on the main app with::
 """
 
 import asyncio
-import json
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
 from pydantic import BaseModel, Field
 
+from src.server.route_utils import on_sim_thread
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["client"])
+
+TELEMETRY_PERIOD_S = 0.2  # 5 Hz
+LIDAR_PERIOD_S = 0.1  # 10 Hz
 
 # Injected once at startup by start_server.py
 _world = None
@@ -110,10 +116,12 @@ async def join_server(req: JoinRequest, request: Request):
     )
 
     try:
-        actor_id = _world.spawn_client_vehicle(
-            session_id=session.session_id,
-            blueprint_id=blueprint,
+        actor_id = await on_sim_thread(
+            _world, _world.spawn_client_vehicle, session.session_id, blueprint
         )
+    except HTTPException:
+        _world.sessions.remove_session(session.session_id)
+        raise
     except Exception as exc:
         _world.sessions.remove_session(session.session_id)
         logger.error("Vehicle spawn failed for session %s: %s", session.session_id, exc)
@@ -129,7 +137,7 @@ async def join_server(req: JoinRequest, request: Request):
 
     lidar_ws_url: Optional[str] = None
     if req.enable_lidar:
-        lidar_ok = _world.enable_client_lidar(session.session_id)
+        lidar_ok = await on_sim_thread(_world, _world.enable_client_lidar, session.session_id)
         if lidar_ok:
             session.lidar_enabled = True
             lidar_ws_url = f"/ws/lidar/{session.session_id}"
@@ -153,7 +161,7 @@ async def leave_server(session_id: str):
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    _world.despawn_client_vehicle(session_id)
+    await on_sim_thread(_world, _world.despawn_client_vehicle, session_id)
     _world.sessions.end_session(session_id)
     return {"ok": True, "message": f"Goodbye {session.client_name}!"}
 
@@ -210,11 +218,22 @@ async def client_websocket(websocket: WebSocket, session_id: str):
 
     logger.info("Client WS connected: session=%s (%s)", session_id, session.client_name)
 
+    async def _receive_loop():
+        # Separate task: a client "ping" is answered at once and never delays telemetry.
+        while True:
+            msg = await websocket.receive_text()
+            if msg == "ping":
+                await websocket.send_json({"type": "pong"})
+
+    receiver = asyncio.create_task(_receive_loop())
     try:
         while True:
             # Session expired?
             if not session.is_active or session.is_expired:
                 await websocket.send_json({"type": "session_expired"})
+                break
+            if receiver.done():  # client closed or the socket failed
+                receiver.result()
                 break
 
             _world.sessions.touch(session_id)
@@ -228,26 +247,28 @@ async def client_websocket(websocket: WebSocket, session_id: str):
                     "remaining_seconds": session.remaining_seconds,
                 })
 
-            # Non-blocking receive — allows client to send "ping" without
-            # blocking the telemetry loop.
-            try:
-                msg = await asyncio.wait_for(websocket.receive_text(), timeout=0.2)
-                if msg == "ping":
-                    await websocket.send_json({"type": "pong"})
-            except asyncio.TimeoutError:
-                pass
-
-            await asyncio.sleep(0.2)  # ~5 Hz telemetry rate
+            await asyncio.sleep(TELEMETRY_PERIOD_S)
 
     except WebSocketDisconnect:
         logger.info("Client WS disconnected: session=%s", session_id)
+    except RuntimeError as exc:
+        if "close message" in str(exc):  # peer closed while we were sending: a normal disconnect
+            logger.info("Client WS closed by peer: session=%s", session_id)
+        else:
+            logger.error("Client WS error for session %s: %s", session_id, exc)
     except Exception as exc:
         logger.error("Client WS error for session %s: %s", session_id, exc)
     finally:
+        receiver.cancel()
         # Auto-cleanup on any disconnect
         if _world is not None:
-            _world.despawn_client_vehicle(session_id)
+            # End the session before the first await: if this task is cancelled while the
+            # despawn is handed to the simulation thread, the session is still marked ended.
             _world.sessions.end_session(session_id)
+            try:
+                await on_sim_thread(_world, _world.despawn_client_vehicle, session_id)
+            except Exception as exc:  # world may have stopped meanwhile
+                logger.warning("Cleanup of session %s skipped: %s", session_id, exc)
         logger.info("Auto-cleaned session %s after WS close", session_id)
 
 
@@ -284,29 +305,39 @@ async def lidar_websocket(websocket: WebSocket, session_id: str):
 
     logger.info("LiDAR WS connected: session=%s (%s)", session_id, session.client_name)
 
+    async def _receive_loop():
+        while True:
+            msg = await websocket.receive_text()
+            if msg == "ping":
+                await websocket.send_json({"type": "pong"})
+
+    receiver = asyncio.create_task(_receive_loop())
     try:
         while True:
             if not session.is_active or session.is_expired:
                 await websocket.send_json({"type": "session_expired"})
+                break
+            if receiver.done():
+                receiver.result()
                 break
 
             payload = _world.get_client_lidar_binary(session_id)
             if payload is not None:
                 await websocket.send_bytes(payload)
 
-            try:
-                msg = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
-                if msg == "ping":
-                    await websocket.send_json({"type": "pong"})
-            except asyncio.TimeoutError:
-                pass
-
-            await asyncio.sleep(0.1)  # ~10 Hz
+            await asyncio.sleep(LIDAR_PERIOD_S)
 
     except WebSocketDisconnect:
         logger.info("LiDAR WS disconnected: session=%s", session_id)
+    except RuntimeError as exc:
+        if "close message" in str(exc):  # peer closed while we were sending: a normal disconnect
+            logger.info("LiDAR WS closed by peer: session=%s", session_id)
+        else:
+            logger.error("LiDAR WS error for session %s: %s", session_id, exc)
     except Exception as exc:
         logger.error("LiDAR WS error for session %s: %s", session_id, exc)
+    finally:
+        receiver.cancel()
 
 
 # ------------------------------------------------------------------ #

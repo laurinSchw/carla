@@ -115,13 +115,15 @@ def main() -> None:
     if args.live:
         try:
             from src.server.persistent_world import PersistentCARLAServer
-            world = PersistentCARLAServer(
+            from src.server.world_config import WorldConfig
+            world = PersistentCARLAServer(WorldConfig(
                 host=args.carla_host,
                 port=args.carla_port,
                 v2x_enabled=not args.no_v2x,
-                v2x_range=args.v2x_range,
+                v2x_range_m=args.v2x_range,
                 tm_port=args.tm_port,
-            )
+                web_port=args.port,
+            ))
             world.start()
             set_persistent_world(world)
             logger.info("Persistent CARLA world started")

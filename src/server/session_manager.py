@@ -7,8 +7,9 @@ and one "leading vehicle" in the simulation.
 
 import uuid
 import logging
+import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ class ClientSession:
     vehicle_actor_id: Optional[int] = None # CARLA actor ID (set after spawn)
     is_active: bool = True
     lidar_enabled: bool = False
-    last_seen: datetime = field(default_factory=datetime.utcnow)
+    last_seen: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # ------------------------------------------------------------------ #
     # Computed properties                                                  #
@@ -37,13 +38,13 @@ class ClientSession:
     def is_expired(self) -> bool:
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     @property
     def remaining_seconds(self) -> Optional[float]:
         if self.expires_at is None:
             return None
-        return max(0.0, (self.expires_at - datetime.utcnow()).total_seconds())
+        return max(0.0, (self.expires_at - datetime.now(timezone.utc)).total_seconds())
 
     def to_dict(self) -> dict:
         return {
@@ -72,6 +73,7 @@ class SessionManager:
 
     def __init__(self) -> None:
         self._sessions: Dict[str, ClientSession] = {}
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------ #
     # CRUD                                                                 #
@@ -85,7 +87,7 @@ class SessionManager:
         duration_seconds: Optional[float],
     ) -> ClientSession:
         session_id = str(uuid.uuid4())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expires_at = now + timedelta(seconds=duration_seconds) if duration_seconds else None
 
         session = ClientSession(
@@ -96,39 +98,47 @@ class SessionManager:
             spawn_time=now,
             expires_at=expires_at,
         )
-        self._sessions[session_id] = session
+        with self._lock:
+            self._sessions[session_id] = session
         logger.info("Session created: %s for '%s' from %s", session_id, client_name, client_ip)
         return session
 
     def get_session(self, session_id: str) -> Optional[ClientSession]:
-        return self._sessions.get(session_id)
+        with self._lock:
+            return self._sessions.get(session_id)
 
     def end_session(self, session_id: str) -> bool:
-        session = self._sessions.get(session_id)
-        if not session:
-            return False
-        session.is_active = False
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+            session.is_active = False
         logger.info("Session ended: %s (%s)", session_id, session.client_name)
         return True
 
     def remove_session(self, session_id: str) -> bool:
-        return self._sessions.pop(session_id, None) is not None
+        with self._lock:
+            return self._sessions.pop(session_id, None) is not None
 
     # ------------------------------------------------------------------ #
     # Queries                                                              #
     # ------------------------------------------------------------------ #
 
     def get_active_sessions(self) -> List[ClientSession]:
-        return [s for s in self._sessions.values() if s.is_active]
+        with self._lock:
+            return [s for s in self._sessions.values() if s.is_active]
 
     def get_expired_sessions(self) -> List[ClientSession]:
-        return [s for s in self._sessions.values() if s.is_active and s.is_expired]
+        with self._lock:
+            return [s for s in self._sessions.values() if s.is_active and s.is_expired]
 
     def all_sessions(self) -> List[ClientSession]:
-        return list(self._sessions.values())
+        with self._lock:
+            return list(self._sessions.values())
 
     def touch(self, session_id: str) -> None:
         """Update last_seen timestamp (called on every WS heartbeat)."""
-        session = self._sessions.get(session_id)
+        with self._lock:
+            session = self._sessions.get(session_id)
         if session:
-            session.last_seen = datetime.utcnow()
+            session.last_seen = datetime.now(timezone.utc)

@@ -47,3 +47,61 @@ Not yet run: modules slated for deletion (`test_complete_system`, `test_frontend
   `LiDARStreamingAPI` tests dropped with their code.
 - Test result without `carla`: 161 passed, 8 skipped, 5 xfailed.
 - Not done yet from the Phase 1 list: `pyproject.toml`, ruff, pyright, pre-commit.
+
+## Server tests (2026-10-10, no model change)
+
+- `tests/contract/` (53 tests, no CARLA): the real FastAPI app with a `FakeWorld` that uses the
+  real `SessionManager`. Pages, admin auth (missing/wrong/unconfigured token), join -> telemetry
+  -> leave, kick, WebSocket telemetry/ping/expiry/disconnect cleanup, traffic/pedestrian
+  endpoints, request validation. Mutation-checked: breaking auth or `leave` makes them fail.
+- `tests/server/` (marker `server`, skipped without `SERVER_URL`): the same life cycle against a
+  RUNNING server over real HTTP/WebSocket. Needs `SERVER_URL`, `ADMIN_TOKEN`; simulation tests
+  (marker `carla`) also use `CARLA_HOST`/`CARLA_PORT` and connect the server if it is idle.
+- Measured against the real app code path with a fake world: telemetry WebSocket rate 2.48 Hz
+  (documented 5 Hz) - confirms handoff defect C6. Not yet verified against live CARLA.
+
+## Phase 1 tooling (2026-10-10, no model change)
+
+- `pyproject.toml` (deps, extras `dev`/`analysis`, ruff config), `.pre-commit-config.yaml`
+  (ruff on commit, offline pytest on push), `pyrightconfig.json` (basic mode on `src/` and
+  `start_server.py`).
+- Ruff (`E9`,`F`) clean: removed 36 unused imports and unused variables. Rule set is
+  deliberately conservative; widen during the restructuring.
+- Pyright basic: 0 errors. `reportOptionalMemberAccess` is switched off in the three server files
+  (42 findings from module-global/None-initialised state) until Phase 2 replaces that design.
+- Test fix: `test_different_seeds_may_differ` computed `all_same` but asserted nothing, so it could
+  never fail; it now asserts (seeds 1 and 999 give different delivery sets, deterministic).
+- `vulture` (confidence 80): one hit, the unused `sensor_data` parameter of `V2VNetworkEnhanced.enable_bidirectional_sharing` (nothing calls it; goes away with the Phase 3 network merge). Every remaining source file is imported somewhere.
+- Still open from Phase 1: live smoke test by a human (admin connect -> client join -> telemetry; `tests/server` covers it when pointed at a live server); archive tag push (HTTP 403 from this environment).
+
+## Phase 2 - single simulation thread (2026-10-10, behaviour-preserving architecture change)
+
+No V2X/channel model change (golden tests unchanged). Fixes handoff defects:
+- C1/C2/C3/C4/C5: only the "carla-tick" thread calls CARLA after `start()`. Handlers use
+  `world.submit(fn)` (`SimThreadExecutor`) and await the result off the event loop. All
+  `apply_batch_sync` calls use `do_tick=False`; the one explicit tick (pedestrian controllers)
+  goes through `_tick()`. Mutating methods raise if called from another thread.
+- C1: `_frame` is CARLA's own frame id (previously a counter that drifted with foreign ticks).
+- C10: telemetry (per frame) and the per-client V2X payload (per V2X update) are published by the
+  sim thread, stamped with the snapshot frame (+ `sim_time`); readers make no RPC.
+- C6: separate receive task, no double wait. Measured telemetry WebSocket rate 2.48 Hz -> 4.97 Hz
+  (target 5 Hz) with the real app on a recording `carla` stub. Not yet measured on live CARLA.
+- C8: spawn points / blueprints use a seeded `random.Random(config.seed)` (was unseeded global).
+- C9: `WorldConfig` (pydantic, cross-field validation: substepping rule, tm_port clashes, whole-frame
+  V2X rate). Defaults reproduce earlier behaviour, including `global_speed_pct = -20.0` (20 % FASTER
+  than the limit) which contradicts `src/config.py` ("30 % slower"); contradiction recorded, not changed.
+- C12: `/admin/connect` validates the config (422), rejects a concurrent connect (409), and reports
+  `connect_state` / `connect_error` in `/admin/status`.
+- C13: timezone-aware datetimes; `SessionManager` has a lock.
+- Robustness (new): an exception in the V2X update or session expiry is logged and the simulation
+  keeps ticking (previously any non-RuntimeError ended the tick thread and destroyed all actors).
+- V2X update gate is now `frame - last >= every_n` (was `frame % 10`), so extra ticks cannot skip it.
+  The second, time-based gate inside the network (defect C7) is Phase 3.
+- LiDAR collector cleanup now runs on the sim thread (was a helper thread making CARLA calls); its
+  internal `time.sleep(0.1)` (L9) briefly stalls the tick loop when a LiDAR session ends (Phase 4).
+- Verification: stub-`carla` tests record the calling thread of every CARLA call (before: 33 of 38
+  calls off-thread, 4 batches ticked implicitly, frame 6 vs real 11; after: 0, 0, equal). Mutation
+  checks confirm the tests fail if `do_tick=True` or the thread guard is restored.
+- NOT verified against a real CARLA server: that actors spawned by `apply_batch_sync(..., False)` are
+  visible to `world.get_actor` before the next tick, and that destroy batches without a tick behave.
+  TODO(verify) - run `tests/server` with CARLA_HOST/CARLA_PORT (traffic/pedestrian/join tests).

@@ -28,7 +28,7 @@ You are able now to access the frontend Dashboard unter [[localhost:8000](http:/
 ### Setting up the workspace
 I recommend to use the Dockerfile to set everything up!
     
-1. setup a virtual environment of your choice using the requirements.txt file
+1. setup a virtual environment of your choice using the requirements.txt file (`pip install -r requirements.txt`; for development also `pip install pytest httpx ruff pyright`, or `pip install -e ".[dev]"`)
 
 2. start venv and run the `start_server.py` script. You can reach the frontend dashboard on [[localhost:8000](http://localhost:8000/)] 
 

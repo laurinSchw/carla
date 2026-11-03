@@ -10,8 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import unittest
-from unittest.mock import Mock, MagicMock
-import math
+from unittest.mock import Mock
 
 from src.v2x.network import V2XNetwork
 from src.v2x.safety_messages import BSMCore

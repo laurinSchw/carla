@@ -7,11 +7,9 @@ Tests backend, coordinate transformations, and data streaming.
 import unittest
 import numpy as np
 import sys
-import time
 import json
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch, AsyncMock
-import asyncio
+from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

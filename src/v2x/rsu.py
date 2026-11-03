@@ -18,10 +18,10 @@ IEEE / ETSI references:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 
-from .messages import MAPMessage, MAPLane, SPATMessage, SPATMovementState
+from .messages import MAPMessage, SPATMessage, SPATMovementState
 
 logger = logging.getLogger(__name__)
 

@@ -18,9 +18,7 @@ Coverage:
 
 import sys
 import unittest
-import math
 from pathlib import Path
-from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -87,8 +85,6 @@ def _run_n_trials(
             random_seed=seed,
         )
         channel = DSRCChannel(cfg)
-        tx_pos = (0.0, 0.0)
-        rx_pos = (distance_m, 0.0)
 
         # Use internal PRR method for a single pair (isolate PHY from geometry)
         prr = channel._compute_prr(distance_m, nlos, n_contenders=1)
@@ -287,7 +283,6 @@ class TestDSRCChannelBroadcast(unittest.TestCase):
         Two vehicles at 10 m with σ=0, no contention must always receive each
         other's BSM (PRR ≈ 1.0 at 10 m from design).
         """
-        channel = self._clear_channel()
         bsms = {0: _bsm(0, x=0.0, y=0.0), 1: _bsm(1, x=10.0, y=0.0)}
         positions = {vid: (b.latitude, b.longitude) for vid, b in bsms.items()}
 
@@ -430,8 +425,8 @@ class TestDSRCChannelDeterminism(unittest.TestCase):
             set(ch1.get_received(r).keys()) == set(ch2.get_received(r).keys())
             for r in bsms
         )
-        # Not a hard assertion because two seeds could (rarely) agree; just log
-        # Results differ in practice at this range; failure here is informational.
+        # Deterministic given the seeds (verified: seeds 1 and 999 give different delivery sets).
+        self.assertFalse(all_same, "different seeds produced identical delivery sets")
 
 
 # ── Geometry helper tests ──────────────────────────────────────────────────────
@@ -533,7 +528,7 @@ class MockSnapshot:
         return self._snaps.get(actor_id)
 
 
-class TestV2VNetworkWithDSRC(unittest.TestCase):
+class TestV2XNetworkWithDSRC(unittest.TestCase):
     """
     Level 2 component test: V2XNetwork with the DSRC channel active.
     Uses zero-shadowing, zero-contention config so outcomes are
