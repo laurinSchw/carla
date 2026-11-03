@@ -123,3 +123,12 @@ def test_queue_is_bounded_and_keeps_the_newest_frames_when_the_consumer_stalls()
     assert h._queue.qsize() == MAX_QUEUED_FRAMES and h.dropped == 1000 - MAX_QUEUED_FRAMES
     assert h.get_measurement(1000, timeout_s=0.01).frame == 1000          # newest survived
     assert h.get_measurement(5, timeout_s=0.01) is None                    # the old ones are gone
+
+
+def test_a_newer_measurement_is_kept_for_the_next_tick_not_thrown_away():
+    """Review finding: asking for frame 10 while 11 was queued consumed 11, so asking for 11 then also failed."""
+    sensor = _FakeSensor()
+    h = CarlaLidarHandle(sensor, LidarConfig())
+    sensor.callback(_measurement(11))
+    assert h.get_measurement(10, timeout_s=0.01) is None
+    assert h.get_measurement(11, timeout_s=0.01).frame == 11

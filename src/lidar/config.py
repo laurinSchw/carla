@@ -109,6 +109,7 @@ class LidarLimits(BaseModel):
     max_total_points_per_second: int = Field(default=2_000_000, ge=0)
     keep_alive_s: float = Field(default=10.0, ge=0.0)   # wall time without viewers before auto-release
     frame_timeout_s: float = Field(default=0.25, gt=0.0)  # how long a tick waits for a sensor's measurement
+    max_consecutive_misses: int = Field(default=40, ge=1)  # then the sensor is declared dead (ERROR) and freed; 40 = 2 s at 20 FPS
 
 
 #: stream profile quantisation (display only; recorded data is never subsampled)

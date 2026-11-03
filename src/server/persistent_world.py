@@ -920,6 +920,8 @@ class PersistentCARLAServer:
             git_sha=_git_sha(), record_links=record_links, record_lidar=record_lidar,
         )
         self.recorder = recorder
+        if self.lidar is not None:
+            self.lidar.hold_all = record_lidar  # sensors must outlive their viewers while raw LiDAR is being recorded
         self._record_event("run_start", name=name)
         for a in self._background_vehicles:  # actors that already exist when the run starts
             p = self._driver_of.get(a.id)
@@ -936,6 +938,8 @@ class PersistentCARLAServer:
 
     def _finish_run(self) -> Optional[dict]:
         recorder, self.recorder = self.recorder, None
+        if self.lidar is not None:
+            self.lidar.hold_all = False
         if recorder is None:
             return None
         self._record_event_to(recorder, "run_stop")
@@ -1046,7 +1050,9 @@ class PersistentCARLAServer:
             raise LidarError("session has no vehicle", session_id=session_id)
         existing = self.lidar.sensor_of_owner(session_id)
         if existing is not None:
-            if config is not None:
+            # re-applying the same settings (a double click, only the stream profile changed) must not destroy the sensor
+            same = config is None or config.resolve(self.config.fixed_delta_seconds).model_dump() == existing["config"]
+            if not same:
                 self.lidar.reconfigure(existing["sensor_id"], config, requester=session_id)
             return self.lidar.get_info(existing["sensor_id"])
         sensor = self.lidar.request(session_id, actor.id, config, own_actor_id=actor.id)

@@ -404,3 +404,156 @@ def test_invalid_configs_are_rejected(kwargs):
 def test_points_per_frame_follows_the_step():
     assert LidarConfig(points_per_second=500_000).points_per_frame(0.05) == 25_000
     assert Mount().z_m == 2.4
+
+
+# ── fixes from the independent review ────────────────────────────────────────
+
+def test_a_10_hz_stream_delivers_every_second_frame_whatever_the_polling_phase(env):
+    """Review finding: polling after odd ticks used to deliver NOTHING for max_hz=10 (the latest frame was odd)."""
+    mgr, _, _ = env
+    s = mgr.request("a", 7, cfg(), own_actor_id=7)
+    mgr.tick(2)
+    prof, got, last = StreamProfile(every_n_frames=2), [], -1
+    for _ in range(40):
+        mgr.tick(1)
+        if mgr.frame % 2 == 1:                           # the poll always lands right after an odd tick
+            r = mgr.get_stream_frame(s.sensor_id, prof, last)
+            if r:
+                got.append(r[0]); last = r[0]
+    assert got and all(f % 2 == 0 for f in got) and len(got) >= 15
+    assert all(b - a == 2 for a, b in zip(got, got[1:]))   # steady 10 Hz: every second simulation frame
+
+
+def test_two_polling_phases_share_the_same_encoded_frame_per_profile(env):
+    mgr, _, _ = env
+    s = mgr.request("a", 7, cfg(), own_actor_id=7)
+    mgr.tick(4)
+    prof = StreamProfile(every_n_frames=4)
+    mgr.tick(1)
+    a = mgr.get_stream_frame(s.sensor_id, prof)
+    mgr.tick(1)
+    b = mgr.get_stream_frame(s.sensor_id, prof)
+    assert a[0] == b[0] and a[1] is b[1]
+
+
+def test_a_pending_reconfigure_counts_at_its_new_size_in_the_budget(env):
+    """Review finding: reconfigure 200k -> 900k then a request for 800k were both accepted (1.7 M against a 1 M budget)."""
+    mgr, _, _ = env
+    a = mgr.request("a", 7, cfg(pps=200_000), own_actor_id=7)
+    mgr.tick(2)
+    mgr.reconfigure(a.sensor_id, cfg(pps=900_000), requester="a")
+    assert mgr.budget()["used_pps"] == 900_000
+    with pytest.raises(LidarBudgetExceeded):
+        mgr.request("b", 8, cfg(pps=800_000), own_actor_id=8)
+
+
+def test_budget_can_be_read_from_other_threads_while_sensors_come_and_go(env):
+    """Review finding: budget() iterated the live dict and raised 'dictionary changed size' on the HTTP thread."""
+    import threading
+    mgr, _, _ = env
+    errors, stop = [], threading.Event()
+
+    def reader():
+        while not stop.is_set():
+            try:
+                mgr.budget(); mgr.list_sensors()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+    t = threading.Thread(target=reader)
+    t.start()
+    for i in range(300):
+        s = mgr.request(f"o{i}", i, cfg(pps=10_000), own_actor_id=i)
+        mgr.tick(1)
+        mgr.release(s.sensor_id, requester=f"o{i}")
+        mgr.tick(1)
+    stop.set(); t.join()
+    assert errors == []
+
+
+def test_a_sensor_that_stops_delivering_is_declared_dead_and_freed(env):
+    """Review finding: it stayed ACTIVE forever and stalled every tick for frame_timeout_s."""
+    mgr, backend, _ = env
+    mgr.limits = LidarLimits(max_sensors=2, max_total_points_per_second=1_000_000, max_consecutive_misses=5)
+    mgr.request("a", 7, cfg(), own_actor_id=7)
+    mgr.tick(2)
+    backend.drop_frames.update(range(mgr.frame + 1, mgr.frame + 50))
+    mgr.tick(6)
+    info = mgr.list_sensors()[0]
+    assert info["state"] == "error" and "consecutive" in info["error"]
+    assert mgr.budget()["used_pps"] == 0 and not backend.live
+
+
+def test_a_single_missed_frame_does_not_kill_the_sensor_and_the_counter_resets(env):
+    mgr, backend, _ = env
+    mgr.limits = LidarLimits(max_sensors=2, max_total_points_per_second=1_000_000, max_consecutive_misses=3)
+    mgr.request("a", 7, cfg(), own_actor_id=7)
+    mgr.tick(2)
+    for gap in (1, 2, 1, 2):                              # never 3 in a row
+        backend.drop_frames.update(range(mgr.frame + 1, mgr.frame + 1 + gap))
+        mgr.tick(gap + 1)
+    assert states(mgr) == ["active"]
+
+
+def test_hold_all_keeps_viewerless_sensors_alive_for_raw_recording(env):
+    mgr, _, clock = env
+    mgr.hold_all = True
+    mgr.request("a", 7, cfg(), own_actor_id=7)
+    mgr.tick(2)
+    clock.t += 1000
+    mgr.tick(3)
+    assert states(mgr) == ["active"]
+    mgr.hold_all = False
+    mgr.tick(1)
+    assert states(mgr) == ["stopping"]
+
+
+def test_reconfigure_of_a_busy_sensor_is_a_409_busy_not_a_400(env):
+    from src.lidar.manager import LidarBusy
+    mgr, _, _ = env
+    s = mgr.request("a", 7, cfg(), own_actor_id=7)
+    with pytest.raises(LidarBusy) as err:
+        mgr.reconfigure(s.sensor_id, cfg(), requester="a")
+    assert err.value.status == 409 and err.value.detail["error"] == "lidar_busy"
+
+
+def test_a_stopping_sensor_does_not_count_as_the_owners_sensor(env):
+    mgr, _, _ = env
+    s = mgr.request("a", 7, cfg(), own_actor_id=7)
+    mgr.tick(2)
+    mgr.release(s.sensor_id, requester="a")
+    assert mgr.sensor_of_owner("a") is None               # a new request may replace it
+    mgr.request("a", 7, cfg(), own_actor_id=7)            # budget is free again too
+
+
+def test_subsampling_barely_changes_when_the_point_count_varies_between_frames(env):
+    """Review finding: a permutation redrawn at a larger size changed ~40 % of the selection."""
+    mgr, _, _ = env
+    a = mgr._subsample_indices(1, 20_000, 10_000)
+    b = mgr._subsample_indices(1, 20_001, 10_000)
+    assert len(set(a) & set(b)) >= 9_990
+    assert len(a) == 10_000 and len(set(a)) == 10_000 and a.max() < 20_000
+
+
+def test_subsampling_is_independent_between_sensors_and_seeds(env):
+    mgr, _, _ = env
+    assert not np.array_equal(mgr._subsample_indices(1, 5_000, 1_000), mgr._subsample_indices(2, 5_000, 1_000))
+    other = LidarManager(FakeBackend(), LidarLimits(), DT, seed=99)
+    assert not np.array_equal(mgr._subsample_indices(1, 5_000, 1_000), other._subsample_indices(1, 5_000, 1_000))
+
+
+def test_encode_cache_does_not_thrash_between_sensors_at_different_frames(env):
+    mgr, backend, _ = env
+    a = mgr.request("a", 7, cfg(pps=100_000), own_actor_id=7)
+    b = mgr.request("b", 8, cfg(pps=100_000), own_actor_id=8)
+    mgr.tick(3)
+    backend.drop_frames.add(mgr.frame + 1)               # both miss one frame, then both catch up: latest frames can differ per sensor
+    mgr.tick(1)
+    p = StreamProfile()
+    fa = mgr.get_stream_frame(a.sensor_id, p)
+    fb = mgr.get_stream_frame(b.sensor_id, p)
+    again_a = mgr.get_stream_frame(a.sensor_id, p)
+    again_b = mgr.get_stream_frame(b.sensor_id, p)
+    assert (fa is None) == (again_a is None) and (fb is None) == (again_b is None)
+    if fa and again_a:
+        assert fa[1] is again_a[1]                       # still the cached bytes object

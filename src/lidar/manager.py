@@ -68,6 +68,12 @@ class LidarPermissionError(LidarError):
     code = "lidar_forbidden"
 
 
+class LidarBusy(LidarError):
+    """The sensor is changing state (requested/spawning/reconfiguring/stopping): try again after the next tick."""
+    status = 409
+    code = "lidar_busy"
+
+
 class LidarInvalidConfig(LidarError):
     status = 422
     code = "lidar_invalid_config"
@@ -105,6 +111,21 @@ class LidarBackend(Protocol):
 
 # --- stream profiles --------------------------------------------------------------------------
 
+MAX_STREAM_DIVISOR = 20  # stream rates are divisors 1..20 of the simulation rate (20 FPS: down to 1 Hz)
+
+
+def _index_scores(seed: int, sensor_id: int, start: int, stop: int) -> np.ndarray:
+    """Deterministic uint64 score per point index in [start, stop) (splitmix64): independent of how many points a frame has."""
+    mask = 0xFFFFFFFFFFFFFFFF
+    salt = (seed * 0x9E3779B97F4A7C15 + sensor_id * 0xBF58476D1CE4E5B9 + 0x94D049BB133111EB) & mask
+    with np.errstate(over="ignore"):
+        x = np.arange(start, stop, dtype=np.uint64) * np.uint64(0x9E3779B97F4A7C15) + np.uint64(salt)
+        x = (x ^ (x >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        x = (x ^ (x >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+        x = x ^ (x >> np.uint64(31))
+    return x
+
+
 @dataclass(frozen=True)
 class StreamProfile:
     """Display-only stream settings, quantised so each frame is encoded once per profile and shared."""
@@ -138,11 +159,11 @@ class Sensor:
     created_frame: int = 0
     last_frame: Optional[int] = None
     missed_frames: int = 0
+    consecutive_misses: int = 0
     viewers: int = 0
     pending_config: Optional[LidarConfig] = None
     handle: Optional[LidarHandle] = None
     no_viewers_since: Optional[float] = None
-    first_perm: Optional[np.ndarray] = field(default=None, repr=False)
 
     def info(self, dt: float) -> dict:
         return {
@@ -192,9 +213,16 @@ class LidarManager:
 
         # published for other threads: replaced, never mutated
         self._published: Tuple[dict, ...] = ()
+        self._published_budget: dict = {}
         self._latest: Dict[int, LidarFrame] = {}
+        # newest frame divisible by n, per sensor and n: a viewer asking for "every n-th frame" gets the newest due frame
+        # however its polling phase drifts against the simulation ticks (a pure `frame % n` test on the latest frame
+        # delivered nothing at all when polls kept landing after odd ticks)
+        self._due: Dict[int, Dict[int, LidarFrame]] = {}
+        self.hold_all = False  # True while a run records raw LiDAR: sensors must not be auto-released
         self._cache_lock = threading.Lock()
         self._encoded: Dict[Tuple[int, int, StreamProfile], bytes] = {}
+        self._hash_cache: Dict[int, np.ndarray] = {}  # per sensor: seeded per-index scores for subsampling
 
     # -- requests (simulation thread) ------------------------------------------------------------
     def request(
@@ -226,7 +254,7 @@ class LidarManager:
         sensor = self._get(sensor_id)
         self._check_owner(sensor, requester, is_admin)
         if sensor.state not in (State.ACTIVE, State.WARMING_UP, State.ERROR):
-            raise LidarError(f"sensor is {sensor.state.value}, cannot be reconfigured now", state=sensor.state.value)
+            raise LidarBusy(f"sensor is {sensor.state.value}, try again after the next tick", state=sensor.state.value)
         cfg = self._resolve(config)
         self._check_budget(cfg, replacing=sensor)
         sensor.pending_config = cfg
@@ -260,6 +288,8 @@ class LidarManager:
                 self._set_state(sensor, State.DESTROYED, reason)
                 del self._sensors[sensor.sensor_id]
                 self._latest = {k: v for k, v in self._latest.items() if k != sensor.sensor_id}
+                self._due = {k: v for k, v in self._due.items() if k != sensor.sensor_id}
+                self._hash_cache.pop(sensor.sensor_id, None)
                 n += 1
         if n:
             self._publish()
@@ -280,6 +310,8 @@ class LidarManager:
             self._set_state(sensor, State.DESTROYED, "shutdown")
         self._sensors.clear()
         self._latest = {}
+        self._due = {}
+        self._hash_cache.clear()
         self._publish()
 
     # -- viewers (any thread, only touches counters) ---------------------------------------------
@@ -308,6 +340,8 @@ class LidarManager:
         for sid in [s.sensor_id for s in self._sensors.values() if s.state is State.DESTROYED]:
             del self._sensors[sid]
             self._latest = {k: v for k, v in self._latest.items() if k != sid}
+            self._due = {k: v for k, v in self._due.items() if k != sid}
+            self._hash_cache.pop(sid, None)
         self._publish()
 
     def _advance(self, s: Sensor, frame: int, sim_time: float) -> None:
@@ -341,12 +375,23 @@ class LidarManager:
         m = s.handle.get_measurement(frame, self.limits.frame_timeout_s) if s.handle else None
         if m is None:
             s.missed_frames += 1
+            s.consecutive_misses += 1
+            if s.consecutive_misses >= self.limits.max_consecutive_misses:
+                # a sensor that stopped delivering (parent destroyed, server hiccup) would otherwise block every tick for
+                # frame_timeout_s forever; give it up, free its handle and its budget
+                self._fail(s, f"no measurement for {s.consecutive_misses} consecutive frames")
             return
+        s.consecutive_misses = 0
         if s.state is State.WARMING_UP:
             self._set_state(s, State.ACTIVE, f"first measurement (frame {m.frame})")
         s.last_frame = m.frame
         lf = LidarFrame(m.frame, sim_time, self._wall(), s.sensor_id, s.actor_id, m)
         self._latest = {**self._latest, s.sensor_id: lf}
+        due = dict(self._due.get(s.sensor_id, {}))
+        for n in range(1, MAX_STREAM_DIVISOR + 1):
+            if lf.frame % n == 0:
+                due[n] = lf
+        self._due = {**self._due, s.sensor_id: due}
         if self._raw_listeners:
             info = s.info(self.dt)
             for cb in self._raw_listeners:
@@ -356,7 +401,7 @@ class LidarManager:
                     logger.exception("LiDAR raw listener failed")
 
     def _auto_release_due(self, s: Sensor) -> bool:
-        if s.pinned or s.record_raw or s.viewers > 0 or s.no_viewers_since is None:
+        if s.pinned or s.record_raw or self.hold_all or s.viewers > 0 or s.no_viewers_since is None:
             return False
         return (self._mono() - s.no_viewers_since) >= self.limits.keep_alive_s
 
@@ -368,13 +413,20 @@ class LidarManager:
         return next((i for i in self._published if i["sensor_id"] == sensor_id), None)
 
     def sensor_of_owner(self, owner: str) -> Optional[dict]:
-        return next((i for i in self._published if i["owner"] == owner), None)
+        """The owner's live sensor (one that is stopping does not count: a new request replaces it)."""
+        return next((i for i in self._published
+                     if i["owner"] == owner and i["state"] not in (State.STOPPING.value, State.DESTROYED.value)), None)
 
     def budget(self) -> dict:
-        used = sum(s.config.points_per_second for s in self._sensors.values() if s.state in _COUNTED)
+        """Budget as published after the last change (safe from any thread); the simulation thread uses ``_budget_now``."""
+        return dict(self._published_budget) or self._budget_now()
+
+    def _budget_now(self) -> dict:
+        # a sensor being reconfigured is counted at its NEW size: it is about to hold that much
+        used = sum((s.pending_config or s.config).points_per_second for s in list(self._sensors.values()) if s.state in _COUNTED)
         return {
             "used_pps": used, "max_pps": self.limits.max_total_points_per_second,
-            "sensors": sum(1 for s in self._sensors.values() if s.state in _COUNTED),
+            "sensors": sum(1 for s in list(self._sensors.values()) if s.state in _COUNTED),
             "max_sensors": self.limits.max_sensors,
         }
 
@@ -391,17 +443,21 @@ class LidarManager:
     ) -> Optional[Tuple[int, bytes]]:
         """Newest frame newer than ``after_frame`` that is due for ``profile``, as protocol-v3 bytes.
 
-        The bytes are produced once per (sensor, frame, profile) and shared by all viewers on that profile.
+        "Due" means the newest frame whose number is a multiple of ``profile.every_n_frames``, so a viewer polling at an
+        unlucky phase still gets every n-th frame. The bytes are produced once per (sensor, frame, profile) and shared by
+        all viewers on that profile. May be called from any thread (encoding is serialised by a lock).
         """
-        lf = self._latest.get(sensor_id)
-        if lf is None or lf.frame <= after_frame or lf.frame % profile.every_n_frames != 0:
+        n = max(1, profile.every_n_frames)
+        lf = self._due.get(sensor_id, {}).get(n) if n <= MAX_STREAM_DIVISOR else self._latest.get(sensor_id)
+        if lf is None or lf.frame <= after_frame or (n > MAX_STREAM_DIVISOR and lf.frame % n != 0):
             return None
         key = (sensor_id, lf.frame, profile)
         with self._cache_lock:
             data = self._encoded.get(key)
             if data is None:
                 data = self._encode(lf, profile)
-                self._encoded = {k: v for k, v in self._encoded.items() if k[1] == lf.frame}
+                # keep only this sensor's newest frames; other sensors' cached entries are not ours to evict
+                self._encoded = {k: v for k, v in self._encoded.items() if k[0] != sensor_id or k[1] == lf.frame}
                 self._encoded[key] = data
         return lf.frame, data
 
@@ -418,15 +474,21 @@ class LidarManager:
         )
 
     def _subsample_indices(self, sensor_id: int, n: int, k: int) -> np.ndarray:
-        """Fixed, seeded random selection per sensor (a stride would show CARLA's per-channel ordering as rings)."""
-        s = self._sensors.get(sensor_id)
-        perm = None if s is None else s.first_perm
-        if perm is None or len(perm) < n:
-            size = max(n, 2 * (len(perm) if perm is not None else 0), 1024)
-            perm = np.random.default_rng((self._seed, sensor_id)).permutation(size)
-            if s is not None:
-                s.first_perm = perm
-        return np.sort(perm[perm < n][:k])
+        """Seeded random selection of ``k`` of ``n`` points (a stride would show CARLA's per-channel ordering as rings).
+
+        Every point index gets a fixed pseudo-random score that depends only on (seed, sensor, index); the ``k`` lowest
+        scores among the first ``n`` are kept. Unlike drawing a permutation of size ``n``, the selection hardly changes when
+        the point count varies from frame to frame (semantic LiDAR returns a different number of points each frame).
+        """
+        scores = self._hash_cache.get(sensor_id)
+        if scores is None or len(scores) < n:
+            old = 0 if scores is None else len(scores)
+            new = _index_scores(self._seed, sensor_id, old, max(n, old * 2, 1024))
+            scores = new if scores is None else np.concatenate([scores, new])
+            self._hash_cache[sensor_id] = scores
+        if k >= n:
+            return np.arange(n)
+        return np.sort(np.argpartition(scores[:n], k)[:k])
 
     def _resolve(self, config: LidarConfig) -> LidarConfig:
         try:
@@ -435,10 +497,10 @@ class LidarManager:
             raise LidarInvalidConfig(str(exc)) from exc
 
     def _check_budget(self, cfg: LidarConfig, replacing: Optional[Sensor]) -> None:
-        b = self.budget()
+        b = self._budget_now()
         used, count = b["used_pps"], b["sensors"]
         if replacing is not None and replacing.state in _COUNTED:
-            used -= replacing.config.points_per_second
+            used -= (replacing.pending_config or replacing.config).points_per_second
             count -= 1
         available = self.limits.max_total_points_per_second - used
         if count + 1 > self.limits.max_sensors or cfg.points_per_second > available:
@@ -496,4 +558,5 @@ class LidarManager:
             del self.events[:1000]
 
     def _publish(self) -> None:
-        self._published = tuple(s.info(self.dt) for s in self._sensors.values())
+        self._published = tuple(s.info(self.dt) for s in list(self._sensors.values()))
+        self._published_budget = self._budget_now()

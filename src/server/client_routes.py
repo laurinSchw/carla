@@ -303,6 +303,8 @@ async def lidar_schema_endpoint():
 @router.get("/client/lidar/{session_id}", summary="State of this session's LiDAR sensor")
 async def get_lidar(session_id: str):
     _active_session(session_id)
+    if _world.lidar is None:
+        raise HTTPException(status_code=503, detail="LiDAR is not available")
     return {"sensor": _world.get_client_lidar_info(session_id), "budget": _world.lidar.budget()}
 
 
@@ -366,7 +368,12 @@ async def lidar_websocket(websocket: WebSocket, session_id: str, max_points: Opt
 
     profile = StreamProfile.quantise(max_points, max_hz, compress, 1.0 / _world.fixed_delta_seconds)
     sensor_id = info["sensor_id"]
-    _world.lidar.viewer_attached(sensor_id)
+    try:
+        _world.lidar.viewer_attached(sensor_id)
+    except LidarError:  # the sensor was released between the lookup and now
+        await websocket.send_json({"type": "state", "state": "destroyed", "frame": None, "error": None})
+        await websocket.close()
+        return
     logger.info("LiDAR WS connected: session=%s (%s) sensor=%d profile=%s", session_id, session.client_name, sensor_id, profile)
 
     async def _receive_loop():
@@ -396,7 +403,8 @@ async def lidar_websocket(websocket: WebSocket, session_id: str, max_points: Opt
             if current is None or current["sensor_id"] != sensor_id:
                 break  # released (or replaced): the viewer reconnects if it wants a new sensor
 
-            got = _world.get_client_lidar_frame(session_id, profile, last_frame)
+            # encoding a 25k-250k point frame takes 1-45 ms: keep it off the event loop that serves every other client
+            got = await asyncio.to_thread(_world.get_client_lidar_frame, session_id, profile, last_frame)
             if got is not None:
                 last_frame, payload = got
                 await websocket.send_bytes(payload)

@@ -31,6 +31,7 @@ class CarlaLidarHandle:
         # Bounded: if the simulation thread stalls, CARLA keeps delivering (a 25k-point semantic frame is ~600 kB),
         # and an unbounded queue grew to several GB. Old frames are useless anyway: only the current one is read.
         self._queue: "queue.Queue" = queue.Queue(maxsize=MAX_QUEUED_FRAMES)
+        self._held = None  # a measurement that is newer than the frame asked for: keep it for the next tick
         self.dropped = 0
         sensor.listen(self._enqueue)
 
@@ -48,17 +49,22 @@ class CarlaLidarHandle:
                     pass
 
     def get_measurement(self, frame: int, timeout_s: float) -> Optional[Measurement]:
+        """The measurement of exactly ``frame``: older ones are dropped, a newer one is kept for the next call."""
         import time
         deadline = time.monotonic() + timeout_s
         while True:
-            try:
-                data = self._queue.get(timeout=max(deadline - time.monotonic(), 0.0))
-            except queue.Empty:
-                return None
+            data = self._held
+            self._held = None
+            if data is None:
+                try:
+                    data = self._queue.get(timeout=max(deadline - time.monotonic(), 0.0))
+                except queue.Empty:
+                    return None
             if data.frame < frame:
                 continue  # stale (e.g. delivered late for an earlier tick)
             if data.frame > frame:
-                return None  # we are behind CARLA; keep it out of this frame
+                self._held = data  # we are behind CARLA; do not throw the newer frame away
+                return None
             return self._convert(data)
 
     def _convert(self, data) -> Measurement:

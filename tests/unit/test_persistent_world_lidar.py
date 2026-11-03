@@ -149,7 +149,7 @@ def test_viewerless_sensor_is_auto_released_and_leaks_no_actor(env):
     srv.submit(srv.enable_client_lidar, session.session_id).result(5)
     assert _wait(lambda: srv.get_client_lidar_info(session.session_id) is not None)
     assert _wait(lambda: srv.get_client_lidar_info(session.session_id) is None, timeout=5.0)
-    assert _live_sensors(rec) == []
+    assert _wait(lambda: _live_sensors(rec) == [])            # the actor goes one tick after the sensor stops counting
     assert any(e["state"] == "stopping" and "no viewers" in e["reason"] for e in srv.lidar.events)
 
 
@@ -196,3 +196,46 @@ def test_status_reports_tick_and_phase_timings(env):
     for phase in ("tick", "world_tick", "lidar"):
         assert t[phase]["n"] > 0 and 0 <= t[phase]["p50"] <= t[phase]["p95"] <= t[phase]["max"], (phase, t[phase])
     assert t["tick"]["p95"] >= t["world_tick"]["p50"]          # a tick contains the world tick
+
+
+def test_reapplying_the_same_settings_does_not_respawn_the_sensor(env):
+    """Review finding: every Apply (even a double click or a stream-profile change) destroyed and respawned the sensor."""
+    rec, make, _ = env
+    srv = make()
+    session, _ = _join(srv)
+    srv.submit(srv.enable_client_lidar, session.session_id, LidarConfig(channels=32)).result(5)
+    assert _wait(lambda: srv.get_client_lidar_info(session.session_id)["state"] == "active")
+    for _ in range(3):
+        srv.submit(srv.enable_client_lidar, session.session_id, LidarConfig(channels=32)).result(5)
+    time.sleep(0.3)
+    kinds = [c[0] for c in rec.calls]
+    assert kinds.count("sensor.listen") == 1 and kinds.count("sensor.destroy") == 0
+    assert srv.get_client_lidar_info(session.session_id)["state"] == "active"
+
+
+def test_a_new_request_right_after_a_release_creates_a_fresh_sensor(env):
+    """Review finding: PUT right after DELETE failed with a 400 until the old sensor was gone."""
+    rec, make, _ = env
+    srv = make()
+    session, _ = _join(srv)
+    srv.submit(srv.enable_client_lidar, session.session_id).result(5)
+    assert _wait(lambda: srv.get_client_lidar_info(session.session_id)["state"] == "active")
+    first = srv.get_client_lidar_info(session.session_id)["sensor_id"]
+    srv.submit(srv.disable_client_lidar, session.session_id).result(5)
+    again = srv.submit(srv.enable_client_lidar, session.session_id).result(5)
+    assert again["sensor_id"] != first
+    assert _wait(lambda: srv.get_client_lidar_info(session.session_id)["state"] == "active")
+    assert _wait(lambda: len(_live_sensors(rec)) == 1)
+
+
+def test_a_recorded_lidar_run_keeps_sensors_alive_without_viewers(env):
+    from src.lidar.config import LidarLimits
+    rec, make, _ = env
+    srv = make(lidar=LidarLimits(keep_alive_s=0.2))
+    session, _ = _join(srv)
+    srv.submit(srv.start_run, "lidar run", True).result(5)
+    srv.submit(srv.enable_client_lidar, session.session_id).result(5)
+    time.sleep(1.2)                                                   # 6x the keep-alive, no viewer
+    assert srv.get_client_lidar_info(session.session_id)["state"] == "active"
+    srv.submit(srv.stop_run).result(5)
+    assert _wait(lambda: srv.get_client_lidar_info(session.session_id) is None, timeout=4.0)

@@ -387,15 +387,23 @@ async function lidarApply() {
 
 async function lidarStop() {
   lidarMessage('');
-  if (_lidarWs) { _lidarWs.onclose = null; _lidarWs.close(); _lidarWs = null; }
+  closeLidarWS();
   try { await fetch(`${HOST}/client/lidar/${_sessionId}`, { method: 'DELETE' }); } catch { /* ignore */ }
   lidarSetState('off');
   if (_lidarView) { _lidarView.frame = null; _lidarView.render(); }
   document.getElementById('lidarStats').textContent = 'stopped';
 }
 
+function closeLidarWS() {
+  if (!_lidarWs) return;
+  clearInterval(_lidarWs._ping);               // the old socket's keep-alive timer must not outlive it
+  _lidarWs.onclose = null;
+  _lidarWs.close();
+  _lidarWs = null;
+}
+
 function openLidarWS(path) {
-  if (_lidarWs) { _lidarWs.onclose = null; _lidarWs.close(); }
+  closeLidarWS();
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
   const maxPoints = parseInt(document.getElementById('lidMaxPoints').value, 10);
   const maxHz = parseInt(document.getElementById('lidMaxHz').value, 10);
@@ -448,7 +456,7 @@ function openLidarWS(path) {
 
 function closeAllWS() {
   if (_ws) { _ws.close(); _ws = null; }
-  if (_lidarWs) { _lidarWs.close(); _lidarWs = null; }
+  closeLidarWS();
   setDot(false);
 }
 

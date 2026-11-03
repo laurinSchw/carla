@@ -94,6 +94,7 @@
         } else {
           const rx = x * cy - y * sy, ry = x * sy + y * cy;          // rotate about z
           const depth = ry * cp + z * sp, up = z * cp - ry * sp;      // tilt
+          if (depth < -this.rangeM * 1.5) continue;                    // behind the virtual camera: cull, do not magnify
           const persp = 1 / (1 + Math.max(-0.8, depth / (this.rangeM * 2.2)));
           sx = w / 2 + rx * scale * persp; sy2 = h * 0.62 - up * scale * persp;
         }
