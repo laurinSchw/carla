@@ -136,6 +136,10 @@ class BSMCore:
     
     # Motion state
     speed: float = 0.0  # m/s
+    # World-frame velocity components (m/s). When both are set the threat model uses them, so
+    # reversing or sliding vehicles are handled; when None it falls back to speed + heading (S14).
+    velocity_x: Optional[float] = None
+    velocity_y: Optional[float] = None
     heading: float = 0.0  # degrees (0-359.9)
     steering_angle: float = 0.0  # degrees
     
@@ -241,48 +245,62 @@ class V2VEnhancedMessage:
     priority: int = 0  # 0=normal, 1=high, 2=emergency
 
 
+def _world_velocity(bsm: BSMCore) -> tuple:
+    """(vx, vy) from the BSM's velocity vector, else from speed along the heading."""
+    if bsm.velocity_x is not None and bsm.velocity_y is not None:
+        return bsm.velocity_x, bsm.velocity_y
+    return (bsm.speed * math.cos(math.radians(bsm.heading)),
+            bsm.speed * math.sin(math.radians(bsm.heading)))
+
+
+def _bounding_radius(bsm: BSMCore) -> float:
+    """Radius of the circle around the vehicle's footprint (half-diagonal of length x width)."""
+    return math.hypot(bsm.vehicle_length / 2.0, bsm.vehicle_width / 2.0)
+
+
 def calculate_threat_level(ego_bsm: BSMCore, other_bsm: BSMCore) -> tuple:
     """
     Calculate collision threat level between two vehicles.
-    
+
+    Time to collision is the closing speed along the line of sight divided by the GAP between
+    the two vehicles' bounding circles (centre distance minus both radii, never below 0), using
+    the BSM velocity vectors (S14). Bounding circles are conservative: they give a shorter TTC
+    than the true footprints for side-by-side geometry.
+
+    The thresholds below are project-defined, not taken from a standard or a cited study:
+    centre distance > 100 m or no closure -> 0; TTC > 10 s -> 1; > 5 s -> 2; > 2 s -> 3; else 4.
+
     Args:
         ego_bsm: Ego vehicle BSM
         other_bsm: Other vehicle BSM
-    
+
     Returns:
-        (threat_level, time_to_collision, distance)
+        (threat_level, time_to_collision, distance) with ``distance`` the centre-to-centre distance.
         threat_level: 0=no threat, 1=low, 2=medium, 3=high, 4=imminent
     """
-    # Calculate distance
     dx = other_bsm.x_m - ego_bsm.x_m
     dy = other_bsm.y_m - ego_bsm.y_m
     distance = math.sqrt(dx**2 + dy**2)
-    
-    # Calculate relative velocity
-    ego_vx = ego_bsm.speed * math.cos(math.radians(ego_bsm.heading))
-    ego_vy = ego_bsm.speed * math.sin(math.radians(ego_bsm.heading))
-    
-    other_vx = other_bsm.speed * math.cos(math.radians(other_bsm.heading))
-    other_vy = other_bsm.speed * math.sin(math.radians(other_bsm.heading))
-    
+
+    ego_vx, ego_vy = _world_velocity(ego_bsm)
+    other_vx, other_vy = _world_velocity(other_bsm)
     rel_vx = other_vx - ego_vx
     rel_vy = other_vy - ego_vy
 
     if distance > 1e-6:
-        # Use radial closing speed along line of sight, not relative speed magnitude.
+        # Radial closing speed along the line of sight, not the relative speed magnitude.
         ux = dx / distance
         uy = dy / distance
         closing_speed = -(rel_vx * ux + rel_vy * uy)
     else:
         closing_speed = float('inf')
-    
-    # Time to collision (TTC)
+
     if closing_speed > 0.1:  # Positive means vehicles are converging
-        ttc = distance / closing_speed
+        gap = max(distance - _bounding_radius(ego_bsm) - _bounding_radius(other_bsm), 0.0)
+        ttc = gap / closing_speed
     else:
         ttc = float('inf')
-    
-    # Determine threat level
+
     if distance > 100 or closing_speed <= 0.1:
         threat = 0  # No threat
     elif ttc > 10:
@@ -293,7 +311,7 @@ def calculate_threat_level(ego_bsm: BSMCore, other_bsm: BSMCore) -> tuple:
         threat = 3  # High threat
     else:
         threat = 4  # Imminent collision
-    
+
     return (threat, ttc, distance)
 
 
@@ -419,6 +437,8 @@ def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int,
         z_m=transform.location.z,
         position_accuracy=0.5,  # Assuming high accuracy in simulation
         speed=speed_ms,
+        velocity_x=velocity.x,
+        velocity_y=velocity.y,
         heading=transform.rotation.yaw % 360,
         steering_angle=steering_angle,
         longitudinal_accel=long_accel,

@@ -18,6 +18,8 @@
  "vehicle_length": 4.6,
  "vehicle_type": 4,
  "vehicle_width": 1.8,
+ "velocity_x": 6.0,
+ "velocity_y": 8.0,
  "vertical_accel": 0.0,
  "x_m": 120.5,
  "y_m": -33.25,

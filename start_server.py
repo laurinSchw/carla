@@ -69,6 +69,8 @@ def _parse_args() -> argparse.Namespace:
                    help="Disable V2X network")
     p.add_argument("--v2x-range", type=float, default=75.0,
                    help="V2X cooperative range in metres")
+    p.add_argument("--v2x-rate", type=float, default=2.0,
+                   help="V2X update rate in Hz; 1/(rate*0.05 s) must be a whole number of frames")
     p.add_argument("--v2x-penetration", type=float, default=1.0,
                    help="Share (0..1) of background vehicles that are V2X stations")
     p.add_argument("--tm-port", type=int, default=8001,
@@ -124,6 +126,7 @@ def main() -> None:
                 v2x_enabled=not args.no_v2x,
                 v2x_range_m=args.v2x_range,
                 v2x_penetration_rate=args.v2x_penetration,
+                v2x_update_rate_hz=args.v2x_rate,
                 tm_port=args.tm_port,
                 web_port=args.port,
             ))

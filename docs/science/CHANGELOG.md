@@ -197,3 +197,21 @@ ground truth — and `get_link_results()`; admin `GET /admin/v2x/links?msg_type=
 - **RNG:** V2I/V2P draws come after the BSM draws of the same update, so runs that have RSUs or VRUs consume the
   seeded stream differently from before; runs without them are unchanged.
 - Drop causes: one Bernoulli draw decides `p_channel · p_mac`, so a radio drop is `"channel_or_mac"` (not separable).
+
+### S14 — threat model uses velocity vectors and vehicle extents
+`BSMCore` gained `velocity_x`, `velocity_y` (world-frame m/s; golden BSMs: only these two fields added).
+`calculate_threat_level` takes the vehicles' velocity vectors (fallback: speed along heading when absent), so a
+reversing or sliding vehicle is handled; TTC is the closing speed along the line of sight divided by the *gap*
+between the two bounding circles (centre distance − both half-diagonals, floor 0), not the centre distance.
+Effect: TTC is shorter than before by (r₁+r₂)/closing speed (≈ 0.5 s at 10 m/s for two cars). The 100 m / 10 s / 5 s /
+2 s thresholds stay and are now labelled project-defined (no citation).
+
+### S18 — update rate: honest docs, configurable everywhere
+Removed the claim that SAE J2735 sets a 2 Hz beacon interval (J2735 defines contents; BSM rate is nominally 10 Hz in
+SAE J2945/1, CAM 1–10 Hz dynamics-triggered in ETSI EN 302 637-2 — both unverified here). Rate is `WorldConfig.v2x_update_rate_hz`
+(default 2.0), now also `--v2x-rate` and `POST /admin/connect {"v2x_update_rate_hz": ...}`; it must divide the simulation rate.
+ETSI CAM triggering rules are not implemented.
+
+### S12 — reproducible update-rate statistic
+`stats['measured_sim_update_hz']` is computed from simulation time (equals the configured rate on a correct gate);
+`measured_update_hz` stays wall-clock and depends on the real-time factor.

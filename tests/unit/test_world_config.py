@@ -40,3 +40,11 @@ def test_v2x_penetration_rate_default_and_bounds():
     for bad in (-0.1, 1.1):
         with pytest.raises(ValidationError):
             WorldConfig(host="h", v2x_penetration_rate=bad)
+
+
+def test_connect_request_exposes_rate_and_penetration_and_builds_a_valid_config():
+    from src.server.admin_routes import ConnectRequest
+    req = ConnectRequest(carla_host="h", v2x_update_rate_hz=4.0, v2x_penetration_rate=0.5)
+    cfg = WorldConfig(host=req.carla_host, v2x_update_rate_hz=req.v2x_update_rate_hz,
+                      v2x_penetration_rate=req.v2x_penetration_rate)
+    assert cfg.v2x_every_n_frames == 5

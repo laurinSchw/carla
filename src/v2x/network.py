@@ -65,8 +65,11 @@ class V2XNetwork:
                        radio model, to every message type: BSM, SPAT, MAP, VRUAM). A packet the
                        radio delivered but from beyond this radius is logged as dropped with
                        cause "out_of_awareness_range". None = no filter, the radio decides.
-            update_rate_hz: BSM application update frequency (default 2 Hz per
-                            SAE J2735 §7.1 minimum beacon interval).
+            update_rate_hz: Application update rate for every message type (default 2 Hz, a project
+                            choice). Real deployments differ: BSM is nominally 10 Hz (SAE J2945/1) and
+                            CAM is 1-10 Hz and dynamics-triggered (ETSI EN 302 637-2); both unverified
+                            here. SAE J2735 only defines message contents, not a transmission rate.
+                            The server requires 1/(rate * dt) to be a whole number of frames.
             enable_cooperative_perception: Enable sensor data sharing.
             world: CARLA World instance (optional, auto-detected on first register).
             dsrc_config: DSRCConfig for the IEEE 802.11p channel model. When None,
@@ -113,10 +116,12 @@ class V2XNetwork:
             'max_neighbors': 0,
             'cooperative_shares': 0,
             'total_update_count': 0,          # number of 2 Hz ticks executed
-            'measured_update_hz': 0.0,        # achieved update rate (wall clock)
+            'measured_update_hz': 0.0,        # achieved update rate (wall clock; depends on real-time factor)
+            'measured_sim_update_hz': 0.0,    # achieved update rate in SIMULATION time (reproducible)
             'bsm_skipped_not_in_snapshot': 0,  # stations absent from the snapshot (destroyed this tick)
         }
         self._first_update_wall_time: Optional[float] = None
+        self._first_update_sim_time: Optional[float] = None
 
         # DENM store: (station_id, action_id) → DENM
         self.denm_store: Dict[Tuple[int, int], DENM] = {}
@@ -406,6 +411,12 @@ class V2XNetwork:
         if self._first_update_wall_time is None:
             self._first_update_wall_time = now
         elapsed_wall = now - self._first_update_wall_time
+        if self.last_update_sim_time is not None:
+            if self._first_update_sim_time is None:
+                self._first_update_sim_time = self.last_update_sim_time
+            elapsed_sim = self.last_update_sim_time - self._first_update_sim_time
+            if n > 1 and elapsed_sim > 0.0:
+                self.stats['measured_sim_update_hz'] = (n - 1) / elapsed_sim
         if n > 1 and elapsed_wall > 0.0:
             # Exclude the first update from the denominator to avoid startup skew
             self.stats['measured_update_hz'] = (n - 1) / elapsed_wall

@@ -138,3 +138,49 @@ def test_s7_one_rsu_for_all_heads_of_an_intersection_at_their_centroid():
     assert rsu.config.intersection_id == 4
     assert rsu.config.position == (5.0, 5.0, 0.0)
     assert len(rsu._traffic_lights) == 4
+
+
+# ── S14 ───────────────────────────────────────────────────────────────────────
+
+def _bsm(x, y, vx=None, vy=None, speed=0.0, heading=0.0, length=4.0, width=2.0):
+    from src.v2x.safety_messages import BSMCore
+    return BSMCore(timestamp=0.0, msg_count=0, vehicle_id=1, x_m=x, y_m=y, speed=speed, heading=heading,
+                   velocity_x=vx, velocity_y=vy, vehicle_length=length, vehicle_width=width)
+
+
+def test_s14_ttc_uses_the_gap_between_bounding_circles_not_centre_distance():
+    from src.v2x.safety_messages import calculate_threat_level
+    ego = _bsm(0, 0, vx=10.0, vy=0.0, speed=10.0)
+    other = _bsm(50, 0, vx=0.0, vy=0.0)
+    _, ttc, distance = calculate_threat_level(ego, other)
+    radius = (2.0 ** 2 + 1.0 ** 2) ** 0.5            # half of a 4 x 2 m footprint, diagonal
+    assert distance == 50.0
+    assert abs(ttc - (50.0 - 2 * radius) / 10.0) < 1e-9
+
+
+def test_s14_reversing_vehicle_uses_its_velocity_vector_not_its_heading():
+    from src.v2x.safety_messages import calculate_threat_level
+    # heading says +x, but the vehicle moves towards -x (reversing) and away from a car behind it
+    ego = _bsm(0, 0, vx=-5.0, vy=0.0, speed=5.0, heading=0.0)
+    other_behind = _bsm(-30, 0, vx=0.0, vy=0.0)
+    level, ttc, _ = calculate_threat_level(ego, other_behind)
+    assert level > 0 and ttc < 10.0                  # closing on the car behind
+    # the old heading-based model saw it driving away from that car
+    ego_no_vec = _bsm(0, 0, speed=5.0, heading=0.0)
+    assert calculate_threat_level(ego_no_vec, other_behind)[0] == 0
+
+
+def test_s14_overlapping_footprints_give_zero_ttc_when_closing():
+    from src.v2x.safety_messages import calculate_threat_level
+    level, ttc, _ = calculate_threat_level(_bsm(0, 0, vx=5.0, vy=0.0), _bsm(3, 0, vx=0.0, vy=0.0))
+    assert ttc == 0.0 and level == 4
+
+
+def test_s12_sim_time_update_rate_is_reported_and_matches_the_configured_rate():
+    net = V2XNetwork(update_rate_hz=2.0)
+    t = 0.0
+    for frame in range(1, 401):
+        t += 0.05
+        if frame % 10 == 0:
+            net.update(NS(timestamp=NS(elapsed_seconds=t)))
+    assert abs(net.stats["measured_sim_update_hz"] - 2.0) < 1e-6
