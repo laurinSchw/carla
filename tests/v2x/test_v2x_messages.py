@@ -439,7 +439,7 @@ class TestV2XNetwork(unittest.TestCase):
         rsu = self._make_rsu(iid=3)
         net.register_rsu(rsu)
 
-        snapshot = _MockSnapshot()
+        snapshot = _MockSnapshot(*net._vrus.values())
         updated = net.update(snapshot=snapshot, force=True)
 
         self.assertTrue(updated)
@@ -453,7 +453,7 @@ class TestV2XNetwork(unittest.TestCase):
         walker = _MockWalker(vid=1000, x=5.0, y=5.0)
         net.register_vru(1000, walker, VRUProfile.PEDESTRIAN)
 
-        snapshot = _MockSnapshot()
+        snapshot = _MockSnapshot(*net._vrus.values())
         net.update(snapshot=snapshot, force=True)
 
         self.assertIn(1000, net.vru_messages)
@@ -468,7 +468,7 @@ class TestV2XNetwork(unittest.TestCase):
         walker = _MockWalker(vid=1001)  # speed ~1.2 m/s > 0.3 threshold
         net.register_vru(1001, walker, VRUProfile.CYCLIST)
 
-        net.update(snapshot=_MockSnapshot(), force=True)
+        net.update(snapshot=_MockSnapshot(*net._vrus.values()), force=True)
 
         vruam = net.get_vruam(1001)
         self.assertIsNotNone(vruam)
@@ -484,7 +484,7 @@ class TestV2XNetwork(unittest.TestCase):
         veh = _MockVehicle(vid=0)
         net.register(0, veh)
         net.register_vru(2000, _StillWalker(vid=2000), VRUProfile.PEDESTRIAN)
-        net.update(snapshot=_MockSnapshot(), force=True)
+        net.update(snapshot=_MockSnapshot(*net._vrus.values()), force=True)
 
         vruam = net.get_vruam(2000)
         self.assertEqual(vruam.motion_state, "stationary")
@@ -499,7 +499,7 @@ class TestV2XNetwork(unittest.TestCase):
         w2 = _MockWalker(vid=1001)
         net.register_vru(1000, w1)
         net.register_vru(1001, w2)
-        net.update(snapshot=_MockSnapshot(), force=True)
+        net.update(snapshot=_MockSnapshot(*net._vrus.values()), force=True)
 
         all_vruam = net.get_all_vruam()
         self.assertEqual(len(all_vruam), 2)
@@ -523,7 +523,7 @@ class TestV2XNetwork(unittest.TestCase):
         net.register_rsu(self._make_rsu(2))
         net.register_vru(1000, _MockWalker(vid=1000))
 
-        net.update(snapshot=_MockSnapshot(), force=True)
+        net.update(snapshot=_MockSnapshot(*net._vrus.values()), force=True)
 
         summary = net.get_v2x_summary()
         self.assertEqual(summary["rsu_count"],   2)

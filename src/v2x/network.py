@@ -211,8 +211,19 @@ class V2XNetwork:
         self.prev_speeds.pop(vehicle_id, None)
         self._max_steer_deg.pop(vehicle_id, None)
         self._extent.pop(vehicle_id, None)
+        # derived state that mentions the vehicle must go too, or it survives until the next update
+        for key in [k for k in self.threats if vehicle_id in k]:
+            del self.threats[key]
+        for key in [k for k in self.distances if vehicle_id in k]:
+            del self.distances[key]
+        for nbrs in self.neighbors.values():
+            if vehicle_id in nbrs:
+                nbrs.remove(vehicle_id)
+        self.denm_inbox.pop(vehicle_id, None)
+        for inbox in (self.spat_inbox, self.map_inbox, self.vruam_inbox):
+            inbox.pop(vehicle_id, None)
 
-        logger.debug(f"Vehicle {vehicle_id} unregistered from V2V network")
+        logger.debug(f"Vehicle {vehicle_id} unregistered from V2X network")
     
     def should_update(self) -> bool:
         """Check if enough time has passed for 2 Hz update"""
@@ -289,6 +300,7 @@ class V2XNetwork:
             self.bsm_messages, positions,
             frame=self._frame_for_links, sim_time=self.last_update_sim_time or 0.0,
             awareness_range_m=self.max_range,
+            contention_positions=self._contention_stations(positions),
         )
         # a COPY: the channel keeps appending every later evaluate_link() to its own list (infrastructure messages too)
         self.last_links = list(self._dsrc_channel.last_links)
@@ -597,10 +609,15 @@ class V2XNetwork:
         """
         Store or update a DENM alert originating from *station_id*.
 
+        Station ids from ``HAZARD_STATION_BASE`` up are reserved for admin hazards (``publish_hazard``): a DENM with such an
+        id would be mistaken for one and silently stop being sent when the hazard is cancelled.
+
         A DENM is uniquely identified by (station_id, action_id).
         Calling publish_denm with the same key overwrites the previous entry
         (i.e. this acts as an update / keep-alive).
         """
+        if denm.station_id >= HAZARD_STATION_BASE and denm.station_id not in self._hazard_tx_power:
+            raise ValueError(f"station ids >= {HAZARD_STATION_BASE} are reserved for hazards (use publish_hazard)")
         self.denm_store[(denm.station_id, denm.action_id)] = denm
         logger.debug(
             "DENM published: station=%d action=%d cause=%s",
@@ -645,7 +662,9 @@ class V2XNetwork:
               total_broadcasts   — total (sender, receiver) pair attempts
               total_deliveries   — successful packet deliveries
               total_drops        — packets dropped by channel model
-              prr                — rolling packet reception rate [0, 1]
+              prr                — cumulative RADIO delivery rate over all message types since start [0, 1]
+                                   (a packet the radio delivered but the awareness range discarded counts as delivered here
+                                   and as `out_of_awareness_range` in the link records)
               avg_rx_margin_db   — average receive margin (P_rx − sensitivity) in dB
         """
         return self._dsrc_channel.get_stats()
@@ -758,6 +777,7 @@ class V2XNetwork:
                     ) % 128
             except Exception as exc:
                 logger.debug("VRU %d update error: %s", vru_id, exc)
+                self.vru_messages.pop(vru_id, None)  # never keep broadcasting a stale message of an actor that is gone
 
     def _build_vruam(
         self,
@@ -769,12 +789,11 @@ class V2XNetwork:
         """Extract kinematics from a CARLA actor and build a VRUAM."""
         if snapshot is not None:
             actor_snap = snapshot.find(actor.id)
-            if actor_snap:
-                tf  = actor_snap.get_transform()
-                vel = actor_snap.get_velocity()
-            else:
-                tf  = actor.get_transform()
-                vel = actor.get_velocity()
+            if not actor_snap:
+                self.vru_messages.pop(vru_id, None)  # not in this tick's snapshot: no stale RPC fallback (same rule as S10)
+                return None
+            tf  = actor_snap.get_transform()
+            vel = actor_snap.get_velocity()
         else:
             tf  = actor.get_transform()
             vel = actor.get_velocity()
@@ -796,6 +815,17 @@ class V2XNetwork:
 
     # ── V2I / V2P over the channel ─────────────────────────────────────────────
 
+    def _contention_stations(self, vehicle_pos: Dict[int, Tuple[float, float]]) -> Dict:
+        """Every transmitter in the contention domain, keys namespaced so ids cannot collide: vehicles by id, RSUs, VRUs and
+        virtual hazard sources as ``(kind, id)``. BSMs and infrastructure messages sent in one tick see the same domain."""
+        stations: Dict = dict(vehicle_pos)
+        stations.update({("rsu", i): (r.config.position[0], r.config.position[1]) for i, r in self._rsus.items()})
+        stations.update({("vru", i): (m.position[0], m.position[1]) for i, m in self.vru_messages.items()})
+        for (station_id, _a), d in self.denm_store.items():
+            if station_id in self._hazard_tx_power:
+                stations[("hazard", station_id)] = (d.event_position[0], d.event_position[1])
+        return stations
+
     def _in_awareness_range(self, distance_m: float) -> bool:
         return self.max_range is None or distance_m <= self.max_range
 
@@ -811,10 +841,7 @@ class V2XNetwork:
         rsu_pos = {iid: (r.config.position[0], r.config.position[1]) for iid, r in self._rsus.items()}
         vru_pos = {vid: (m.position[0], m.position[1]) for vid, m in self.vru_messages.items()}
 
-        # carrier-sense contention domain: every transmitter, namespaced so ids cannot collide
-        stations = dict(vehicle_pos)
-        stations.update({("rsu", i): p for i, p in rsu_pos.items()})
-        stations.update({("vru", i): p for i, p in vru_pos.items()})
+        stations = self._contention_stations(vehicle_pos)
 
         spat_inbox: Dict[int, Dict[int, SPATMessage]] = {vid: {} for vid in vehicle_pos}
         map_inbox: Dict[int, Dict[int, MAPMessage]] = {vid: {} for vid in vehicle_pos}
@@ -831,11 +858,8 @@ class V2XNetwork:
             elif station_id in self._hazard_tx_power:
                 xy = (denm.event_position[0], denm.event_position[1])
                 denm_sources.append((("hazard", station_id), station_id, xy, self._hazard_tx_power[station_id], "I2V", denm))
-        for key, _tx_id, xy, _p, _lt, _d in denm_sources:
-            if isinstance(key, tuple):
-                stations[key] = xy
 
-        def transmit(key, tx_id, tx_xy, tx_power, link_type, items, exclude_rx=None, awareness_m="default"):
+        def transmit(key, tx_id, tx_xy, tx_power, link_type, items, exclude_rx=None, awareness_m="default", awareness_ref=None):
             """items: (msg_type, message, inbox dict, key under which a receiver stores it).
 
             ``awareness_m`` overrides the network's awareness range for this transmission (a DENM is filtered by its own
@@ -857,9 +881,10 @@ class V2XNetwork:
                     link = channel.evaluate_link(
                         tx_id, rx_id, tx_xy, rx_xy, los_blocked, n_contenders,
                         msg_type=msg_type, link_type=link_type, tx_power_dbm=tx_power,
-                        frame=frame, sim_time=sim_time, awareness_range_m=awareness_m,
+                        frame=frame, sim_time=sim_time, awareness_range_m=awareness_m, awareness_ref_xy=awareness_ref,
                     )
-                    links.append(link)
+                    if channel.config.record_links:
+                        links.append(link)
                     if link.delivered:
                         inbox[rx_id][store_key] = msg
 
@@ -872,10 +897,12 @@ class V2XNetwork:
         for key, tx_id, xy, power, link_type, denm in denm_sources:
             transmit(key, tx_id, xy, power, link_type,
                      (("DENM", denm, denm_inbox, (denm.station_id, denm.action_id)),),
-                     exclude_rx=tx_id if link_type == "V2V" else None, awareness_m=denm.relevance_distance)
+                     exclude_rx=tx_id if link_type == "V2V" else None, awareness_m=denm.relevance_distance,
+                     awareness_ref=(denm.event_position[0], denm.event_position[1]))
 
         self.map_inbox, self.spat_inbox, self.vruam_inbox = map_inbox, spat_inbox, vruam_inbox
         self.denm_inbox = denm_inbox
+        channel._flush_stats()  # prr / avg margin must include the infrastructure messages sent after broadcast_all
         self.last_links = self.last_links + links
 
     # ── Public accessors ───────────────────────────────────────────────────────

@@ -202,6 +202,7 @@ class DSRCChannel:
         frame: int = 0,
         sim_time: float = 0.0,
         awareness_range_m: Optional[float] = None,
+        contention_positions: Optional[Dict] = None,
     ) -> None:
         """
         Compute channel delivery for every (sender, receiver) pair this tick.
@@ -214,6 +215,9 @@ class DSRCChannel:
             frame, sim_time: stamped on the LinkResult records only.
             awareness_range_m: application filter applied after the radio; affects the LinkResult
                 outcome only (``get_received`` still reports radio delivery).
+            contention_positions: every station that contends for the channel (vehicles AND RSUs, VRUs, hazard sources),
+                keyed so that ids cannot collide; defaults to ``positions``. A BSM and a MAP sent in the same tick must see
+                the same contention domain.
 
         Call once per V2X update tick. Results are stable until the next call.
         """
@@ -226,7 +230,7 @@ class DSRCChannel:
             if tx_pos is None:
                 continue
 
-            n_contenders = self._count_contenders(sender_id, tx_pos, positions)
+            n_contenders = self._count_contenders(sender_id, tx_pos, contention_positions or positions)
             nlos_by_rx = (
                 self.nlos_to_receivers(sender_id, tx_pos, positions)
                 if self.config.enable_nlos_model else {}
@@ -266,23 +270,25 @@ class DSRCChannel:
         frame: int = 0,
         sim_time: float = 0.0,
         awareness_range_m: Optional[float] = None,
+        awareness_ref_xy: Optional[Tuple[float, float]] = None,
     ) -> LinkResult:
         """Decide one transmission attempt and update the channel statistics.
 
         Every message type (BSM, SPAT, MAP, VRUAM) uses this one path. ``tx_power_dbm`` is the
         transmitter's own power (OBU, RSU, VRU device); None means ``config.tx_power_dbm``.
         ``awareness_range_m`` (None = no filter) turns a radio delivery from farther away into
-        ``delivered=False, drop_cause="out_of_awareness_range"`` in the record.
+        ``delivered=False, drop_cause="out_of_awareness_range"`` in the record. The range is measured from the transmitter,
+        or from ``awareness_ref_xy`` (a DENM: its event position) when given.
         Consumes the seeded RNG in a fixed order (one Gaussian, then one uniform draw).
         """
         link, _ = self._evaluate(tx_id, rx_id, tx_pos, rx_pos, nlos, n_contenders, msg_type, link_type,
-                                 tx_power_dbm, frame, sim_time, awareness_range_m)
+                                 tx_power_dbm, frame, sim_time, awareness_range_m, awareness_ref_xy)
         if self.config.record_links:
             self.last_links.append(link)
         return link
 
     def _evaluate(self, tx_id, rx_id, tx_pos, rx_pos, nlos, n_contenders, msg_type, link_type,
-                  tx_power_dbm, frame, sim_time, awareness_range_m):
+                  tx_power_dbm, frame, sim_time, awareness_range_m, awareness_ref_xy=None):
         """Core of ``evaluate_link``: returns ``(record, radio_delivered)`` without storing the record."""
         cfg = self.config
         tx_power = cfg.tx_power_dbm if tx_power_dbm is None else tx_power_dbm
@@ -308,7 +314,8 @@ class DSRCChannel:
         self.stats["total_deliveries" if radio_delivered else "total_drops"] += 1
         if not radio_delivered:
             delivered, cause = False, "channel_or_mac"
-        elif awareness_range_m is not None and distance > awareness_range_m:
+        elif awareness_range_m is not None and (
+                distance if awareness_ref_xy is None else _euclidean(awareness_ref_xy, rx_pos)) > awareness_range_m:
             delivered, cause = False, "out_of_awareness_range"
         else:
             delivered, cause = True, None

@@ -1,5 +1,6 @@
 """S4: MAP, SPAT and VRUAM go through the same DSRC channel as BSMs (REFACTOR_HANDOFF §3.2)."""
 
+import pytest
 from types import SimpleNamespace as NS
 
 from src.v2x.dsrc_channel import DSRCChannel, DSRCConfig
@@ -106,11 +107,12 @@ def test_awareness_range_filters_after_the_radio_and_is_logged():
 
 def test_vru_beacons_go_through_the_channel_as_p2v():
     net, snap = _world(vehicle_x=(0.0,))
-    net.register_vru(900, _Walker())
-    net.update(snap, force=True)
+    walker = _Walker()
+    net.register_vru(900, walker)
+    net.update(_Snapshot({**snap._snaps, 900: walker}), force=True)
     link = next(l for l in net.get_link_results() if l.msg_type == "VRUAM")
     assert (link.link_type, link.tx_id, link.rx_id) == ("P2V", 900, 1)
-    assert 900 in net.vruam_inbox[1] or not link.delivered
+    assert link.delivered and 900 in net.vruam_inbox[1]                   # co-located: certain delivery
 
 
 def test_inboxes_do_not_keep_messages_from_earlier_updates():
@@ -125,8 +127,9 @@ def test_inboxes_do_not_keep_messages_from_earlier_updates():
 def test_every_message_type_has_the_same_record_shape_and_is_reproducible():
     def run():
         net, snap = _world(vehicle_x=(20.0, 120.0, 400.0))
-        net.register_vru(900, _Walker())
-        net.update(snap, force=True)
+        walker = _Walker()
+        net.register_vru(900, walker)
+        net.update(_Snapshot({**snap._snaps, 900: walker}), force=True)
         return [(l.msg_type, l.tx_id, l.rx_id, l.delivered, round(l.rx_power_dbm, 9)) for l in net.get_link_results()]
 
     assert run() == run()
@@ -260,7 +263,9 @@ def test_hazard_relevance_needs_range_and_movement_towards_the_event():
 def test_every_attempt_appears_exactly_once_in_the_link_results():
     """Regression: MAP/SPAT/VRUAM links were listed twice (the channel's list was aliased and the infrastructure links added again)."""
     net, snap = _world(vehicle_x=(20.0, 60.0, 90.0))
-    net.register_vru(900, _Walker())
+    walker = _Walker()
+    net.register_vru(900, walker)
+    snap = _Snapshot({**snap._snaps, 900: walker})
     net.update(snap, force=True)
     keys = [(l.msg_type, l.tx_id, l.rx_id) for l in net.get_link_results()]
     assert len(keys) == len(set(keys)), "duplicate link records"
@@ -271,10 +276,82 @@ def test_every_attempt_appears_exactly_once_in_the_link_results():
     assert len(net.get_link_results()) == len(keys)
 
 
-def test_link_results_are_complete_even_when_the_channel_does_not_record_them():
+def test_record_links_false_switches_all_link_records_off_but_not_delivery():
     net = V2XNetwork(max_range=None, dsrc_config=DSRCConfig(shadowing_std_los_db=0.0, enable_nlos_model=False, record_links=False))
     actor, snap = _vehicle(1, 20.0)
     net.register(1, actor)
     net.register_rsu(RoadSideUnit(RSUConfig(intersection_id=5, position=(0.0, 0.0, 0.0))))
     net.update(_Snapshot({1: snap}), force=True)
-    assert sorted(l.msg_type for l in net.get_link_results()) == ["MAP", "SPAT"]
+    assert net.get_link_results() == []                        # record_links=False: no records at all, not half of them
+    assert 5 in net.map_inbox[1] and 5 in net.spat_inbox[1]    # ... while delivery itself still works
+
+
+# ── fixes from the independent review ────────────────────────────────────────
+
+def test_channel_stats_are_consistent_after_infrastructure_messages():
+    """Review finding: prr (0.667) still reflected only the BSMs while total_deliveries/total_broadcasts (0.917) included MAP/SPAT."""
+    net, snap = _world(vehicle_x=(20.0, 60.0, 90.0))
+    net.update(snap, force=True)
+    st = net.get_channel_stats()
+    assert st["total_broadcasts"] == len(net.get_link_results())
+    assert st["prr"] == st["total_deliveries"] / st["total_broadcasts"]
+    assert st["total_deliveries"] + st["total_drops"] == st["total_broadcasts"]
+
+
+def test_bsm_and_infrastructure_messages_see_the_same_contention_domain():
+    """Review finding: BSMs counted contenders among vehicles only, MAP/SPAT among all stations (model.md says all)."""
+    net, snap = _world(vehicle_x=(20.0, 60.0))
+    for k in range(6):                                                   # six extra RSUs close by
+        net.register_rsu(RoadSideUnit(RSUConfig(intersection_id=10 + k, position=(float(k), 5.0, 0.0))))
+    net.update(snap, force=True)
+    links = net.get_link_results()
+    bsm = next(l for l in links if l.msg_type == "BSM")
+    spat = next(l for l in links if l.msg_type == "SPAT")
+    stations = 2 + 7                                                     # 2 vehicles + 7 RSUs, all within 300 m
+    assert bsm.p_mac == spat.p_mac == net._dsrc_channel._csma_success_prob(stations)
+
+
+def test_a_vehicles_denm_is_filtered_by_distance_from_the_EVENT_not_from_the_sender():
+    """Review finding: the sender at x=0 reporting an event at x=290 (relevance 50 m) was dropped for the vehicle next to the event."""
+    net, snap = _world(rsu_xy=(5000.0, 5000.0), vehicle_x=(0.0, 300.0, 10.0))
+    net.update(snap, force=True)
+    net.publish_denm(DENM(station_id=1, action_id=1, detection_time=1.0, reference_time=1.0, event_position=(290.0, 0.0, 0.0),
+                          relevance_distance=50.0, cause_code=DENMCauseCode.ACCIDENT))
+    net.update(_Snapshot(snap._snaps, t=1.5), force=True)
+    by_rx = {l.rx_id: l for l in net.get_link_results() if l.msg_type == "DENM"}
+    assert by_rx[2].distance_m == 300.0 and by_rx[2].delivered is True            # 10 m from the event: relevant
+    assert by_rx[3].drop_cause == "out_of_awareness_range"                        # 280 m from the event: not relevant
+    assert (1, 1) in net.denm_inbox[2] and net.denm_inbox[3] == {}
+
+
+def test_a_walker_that_leaves_the_snapshot_stops_being_broadcast():
+    """Review finding: a stale VRUAM was sent every tick forever; the fallback also made a blocking RPC for stale data."""
+    net, snap = _world(vehicle_x=(0.0,))
+    walker = _Walker()
+    net.register_vru(900, walker)
+    net.update(_Snapshot({**snap._snaps, 900: walker}), force=True)
+    assert 900 in net.vru_messages
+    net.update(_Snapshot(snap._snaps, t=2.0), force=True)                         # walker gone from the snapshot
+    assert 900 not in net.vru_messages and not [l for l in net.get_link_results() if l.msg_type == "VRUAM"]
+
+
+def test_station_ids_in_the_hazard_range_are_reserved_for_hazards():
+    """Review finding: such a DENM silently stopped being sent once the hazard with the same id was cancelled."""
+    net, snap = _world(vehicle_x=(20.0,))
+    net.update(snap, force=True)
+    with pytest.raises(ValueError, match="reserved"):
+        net.publish_denm(DENM(station_id=HAZARD_STATION_BASE + 1, action_id=7, detection_time=0.0, reference_time=0.0,
+                              event_position=(0, 0, 0)))
+    hz = net.publish_hazard((10.0, 0.0, 0.0))
+    assert net.cancel_denm(hz.station_id, 0) and net.get_hazards() == []
+
+
+def test_unregistering_a_vehicle_removes_everything_derived_from_it():
+    """Review finding: threats, neighbour lists, distances and inboxes mentioned the vehicle until the next update."""
+    net, snap = _world(rsu_xy=(500.0, 500.0), vehicle_x=(5.0, 9.0))
+    net.update(snap, force=True)
+    net.update(_Snapshot(snap._snaps, t=2.0), force=True)
+    net.threats[(1, 2)] = {"level": 3}; net.threats[(2, 1)] = {"level": 3}
+    net.unregister(2)
+    assert all(2 not in k for k in net.threats) and all(2 not in k for k in net.distances)
+    assert all(2 not in n for n in net.neighbors.values()) and 2 not in net.denm_inbox and 2 not in net.spat_inbox
