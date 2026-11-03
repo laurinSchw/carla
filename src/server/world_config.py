@@ -32,6 +32,9 @@ class WorldConfig(BaseModel):
     v2x_enabled: bool = True
     v2x_range_m: float = Field(default=75.0, ge=10.0, le=500.0)
     v2x_update_rate_hz: float = Field(default=2.0, gt=0)
+    # Share of background (non-client) vehicles that are V2X stations (handoff S3 / D2).
+    # 1.0 = all equipped; client vehicles are always stations.
+    v2x_penetration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
 
     # web server port, only used to reject a clashing tm_port
     web_port: int = 8000

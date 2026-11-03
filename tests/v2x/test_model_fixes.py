@@ -124,3 +124,17 @@ def test_s11_physics_control_is_read_once_at_registration():
         net.update(snap)
     assert len(net.bsm_messages) == 1
     assert len(calls) == 1
+
+
+def test_s7_one_rsu_for_all_heads_of_an_intersection_at_their_centroid():
+    class _Light:
+        def __init__(self, x, y):
+            self._loc = _vec(x, y, 0.0)
+
+        def get_transform(self):
+            return NS(location=self._loc)
+
+    rsu = RoadSideUnit.from_traffic_lights([_Light(0, 0), _Light(10, 0), _Light(10, 10), _Light(0, 10)], 4)
+    assert rsu.config.intersection_id == 4
+    assert rsu.config.position == (5.0, 5.0, 0.0)
+    assert len(rsu._traffic_lights) == 4

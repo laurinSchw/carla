@@ -132,6 +132,26 @@ class RoadSideUnit:
         )
         return cls(config, traffic_lights=[traffic_light])
 
+    @classmethod
+    def from_traffic_lights(
+        cls,
+        traffic_lights: List,
+        intersection_id: int,
+        broadcast_range_m: float = 300.0,
+    ) -> "RoadSideUnit":
+        """Build one RSU for all signal heads of an intersection (SPAT then has one signal group per head).
+
+        The RSU sits at the centroid of the heads.
+        """
+        locs = [tl.get_transform().location for tl in traffic_lights]
+        n = len(locs)
+        config = RSUConfig(
+            intersection_id=intersection_id,
+            position=(sum(l.x for l in locs) / n, sum(l.y for l in locs) / n, sum(l.z for l in locs) / n),
+            broadcast_range_m=broadcast_range_m,
+        )
+        return cls(config, traffic_lights=list(traffic_lights))
+
     # ── MAP generation ─────────────────────────────────────────────────────────
 
     def get_map(self, timestamp: float) -> MAPMessage:

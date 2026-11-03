@@ -156,3 +156,22 @@ documented as inaccurate.
 ### S11 — physics constants cached
 `max_steer_angle` is read once in `V2XNetwork.register` instead of a blocking `get_physics_control()` RPC per
 vehicle per update.
+
+### S3 / D2 — background vehicles are V2X stations (penetration rate)
+In the server, only client vehicles were V2X stations, so the channel saw N ≈ number of clients: the CSMA term
+was ≈ 1 and NLOS blockers/neighbours existed only between clients. Now every spawned background vehicle is
+registered with probability `v2x_penetration_rate` (new `WorldConfig` field, admin `/admin/connect`
+`v2x_penetration_rate`, CLI `--v2x-penetration`; default **1.0** = all equipped, handoff D2 default). The draw uses a
+separate seeded stream (`seed + 1`), so spawn choices stay reproducible. Unregistered on despawn.
+- **Behaviour change:** with background traffic, N (CSMA contenders, N² channel pairs, neighbours) is larger than
+  before. Cost grows with N²; no live-CARLA timing measured yet — measure before running with > ~100 stations.
+
+### S7 — one RSU per signalised intersection
+RSUs used `id(tl) % 10000` (the Python object id), so every traffic light became its own "intersection", and only
+10 arbitrary lights got an RSU. Now lights are grouped with CARLA's `get_group_traffic_lights()`, one RSU per
+group at the centroid of its heads (`RoadSideUnit.from_traffic_lights`), ids assigned by ascending smallest
+actor id (stable between runs), no arbitrary cap. **Not yet verified on live CARLA** (group semantics).
+
+### D6 — ER model
+Decision: no database; the run directory (handoff §5.6) is the schema. `docs/ER_DATABASE_MODEL.md` carries a
+status note; the diagram is regenerated when Phase 7 lands.

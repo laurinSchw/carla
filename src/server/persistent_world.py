@@ -74,6 +74,8 @@ class PersistentCARLAServer:
 
         # Seeded RNG for spawn points / blueprints (defect C8)
         self._rng = random.Random(config.seed)
+        # separate stream so the penetration draw never shifts spawn-point/blueprint choices
+        self._v2x_rng = random.Random(config.seed + 1)
 
         # CARLA handles
         self.client: Optional[carla.Client] = None
@@ -220,15 +222,21 @@ class PersistentCARLAServer:
                 update_rate_hz=self.config.v2x_update_rate_hz,
                 world=self.world,
             )
-            # Auto-create RSUs from CARLA traffic lights (up to 10 intersections)
+            # One RSU per CARLA traffic-light group (= one signalised intersection), ordered
+            # by the smallest actor id in the group so ids are stable between runs (S7).
             all_tl = list(self.world.get_actors().filter("traffic.traffic_light"))
-            junctions_seen: dict = {}
-            for tl in all_tl:
-                jid = id(tl) % 10000  # stable pseudo-ID per actor
-                if jid not in junctions_seen:
-                    junctions_seen[jid] = tl
-            for rsu_idx, (_jid, tl) in enumerate(list(junctions_seen.items())[:10]):
-                rsu = RoadSideUnit.from_traffic_light(tl, intersection_id=rsu_idx + 1)
+            groups: dict = {}
+            for tl in sorted(all_tl, key=lambda t: t.id):
+                try:
+                    members = list(tl.get_group_traffic_lights())
+                except Exception:
+                    members = []
+                members.append(tl)
+                key = min(m.id for m in members)
+                groups.setdefault(key, {}).update({m.id: m for m in members})
+            for rsu_idx, key in enumerate(sorted(groups)):
+                lights = [groups[key][i] for i in sorted(groups[key])]
+                rsu = RoadSideUnit.from_traffic_lights(lights, intersection_id=rsu_idx + 1)
                 self.v2x_network.register_rsu(rsu)
             logger.info(
                 "V2X network initialised: range=%.0f m, %d RSUs",
@@ -393,10 +401,20 @@ class PersistentCARLAServer:
             actor = self.world.get_actor(r.actor_id)
             if actor:
                 self._background_vehicles.append(actor)
+                self._maybe_register_background_v2x(actor)
                 spawned += 1
 
         logger.info("Spawned %d / %d background vehicles", spawned, count)
         return spawned
+
+    def _maybe_register_background_v2x(self, actor) -> None:
+        """Make a background vehicle a V2X station with probability ``v2x_penetration_rate``."""
+        if self.v2x_network is None:
+            return
+        rate = self.config.v2x_penetration_rate
+        if rate < 1.0 and self._v2x_rng.random() >= rate:
+            return
+        self.v2x_network.register(actor.id, actor)
 
     def despawn_background_traffic(self) -> int:
         """Destroy all admin-managed background vehicles."""
@@ -404,6 +422,9 @@ class PersistentCARLAServer:
         count = len(self._background_vehicles)
         if count == 0:
             return 0
+        if self.v2x_network is not None:
+            for v in self._background_vehicles:
+                self.v2x_network.unregister(v.id)
         batch = [carla.command.DestroyActor(v) for v in self._background_vehicles]
         self.client.apply_batch_sync(batch, False)
         self._background_vehicles.clear()

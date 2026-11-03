@@ -73,6 +73,7 @@ class ConnectRequest(BaseModel):
     carla_port: int = Field(default=2000, ge=1, le=65535)
     v2x_enabled: bool = True
     v2x_range: float = Field(default=75.0, ge=10.0, le=500.0)
+    v2x_penetration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
     tm_port: int = Field(default=8001, ge=1024, le=65535)
 
 
@@ -119,6 +120,7 @@ async def connect_world(req: ConnectRequest):
             port=req.carla_port,
             v2x_enabled=req.v2x_enabled,
             v2x_range_m=req.v2x_range,
+            v2x_penetration_rate=req.v2x_penetration_rate,
             tm_port=req.tm_port,
         )
     except ValidationError as exc:

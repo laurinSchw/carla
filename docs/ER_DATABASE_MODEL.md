@@ -1,5 +1,14 @@
 # V2V Framework — ER Database Model
 
+> **Status (decision D6, 2026-11-03):** no database is implemented and none is planned. This ER model is a
+> **conceptual** description only. The **physical schema is the run directory** specified in
+> `REFACTOR_HANDOFF.md` §5.6 (Phase 7, **not implemented yet**):
+> `runs/<UTC-timestamp>_<short-sha>_<name>/` with `manifest.json`, `events.jsonl`, `v2x_links.jsonl`,
+> `stations.jsonl`, `messages.jsonl`, `lidar_meta.jsonl` and optional `lidar/<sensor_id>/<frame>.bin`.
+> Entity and field names below predate the V2V→V2X merge (`v2v_*`, BSM `latitude/longitude`); when Phase 7 lands,
+> this diagram must be regenerated from the real fields. Do not treat the field lists as an implemented contract.
+
+
 ```mermaid
 erDiagram
     SIMULATION_RUN {
