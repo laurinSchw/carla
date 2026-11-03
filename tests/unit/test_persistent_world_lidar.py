@@ -200,7 +200,7 @@ def test_status_reports_tick_and_phase_timings(env):
 
 def test_reapplying_the_same_settings_does_not_respawn_the_sensor(env):
     """Review finding: every Apply (even a double click or a stream-profile change) destroyed and respawned the sensor."""
-    rec, make, _ = env
+    rec, make = env
     srv = make()
     session, _ = _join(srv)
     srv.submit(srv.enable_client_lidar, session.session_id, LidarConfig(channels=32)).result(5)
@@ -215,7 +215,7 @@ def test_reapplying_the_same_settings_does_not_respawn_the_sensor(env):
 
 def test_a_new_request_right_after_a_release_creates_a_fresh_sensor(env):
     """Review finding: PUT right after DELETE failed with a 400 until the old sensor was gone."""
-    rec, make, _ = env
+    rec, make = env
     srv = make()
     session, _ = _join(srv)
     srv.submit(srv.enable_client_lidar, session.session_id).result(5)
@@ -228,10 +228,10 @@ def test_a_new_request_right_after_a_release_creates_a_fresh_sensor(env):
     assert _wait(lambda: len(_live_sensors(rec)) == 1)
 
 
-def test_a_recorded_lidar_run_keeps_sensors_alive_without_viewers(env):
+def test_a_recorded_lidar_run_keeps_sensors_alive_without_viewers(env, tmp_path):
     from src.lidar.config import LidarLimits
-    rec, make, _ = env
-    srv = make(lidar=LidarLimits(keep_alive_s=0.2))
+    rec, make = env
+    srv = make(lidar=LidarLimits(keep_alive_s=0.2), runs_dir=str(tmp_path / "runs"))
     session, _ = _join(srv)
     srv.submit(srv.start_run, "lidar run", True).result(5)
     srv.submit(srv.enable_client_lidar, session.session_id).result(5)
