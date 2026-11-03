@@ -23,8 +23,6 @@ from .safety_messages import (
     PRIORITY_ROUTINE, PRIORITY_HIGH, PRIORITY_EMERGENCY,
     V2V_RANGE_MEDIUM, SHARE_SENSOR_DATA_DISTANCE
 )
-from dataclasses import replace
-
 from .dsrc_channel import DSRCChannel, DSRCConfig, LinkResult
 from .messages import (
     SPATMessage, MAPMessage,
@@ -270,8 +268,9 @@ class V2XNetwork:
         self._dsrc_channel.broadcast_all(
             self.bsm_messages, positions,
             frame=self._frame_for_links, sim_time=self.last_update_sim_time or 0.0,
+            awareness_range_m=self.max_range,
         )
-        self.last_links = self._apply_awareness_filter(self._dsrc_channel.last_links)
+        self.last_links = self._dsrc_channel.last_links
 
         # ── Phase 3: Neighbor discovery using channel-filtered BSM view ───────
         self._discover_neighbors()
@@ -729,16 +728,6 @@ class V2XNetwork:
     def _in_awareness_range(self, distance_m: float) -> bool:
         return self.max_range is None or distance_m <= self.max_range
 
-    def _apply_awareness_filter(self, links: List[LinkResult]) -> List[LinkResult]:
-        """Mark packets the radio delivered but the awareness range discards (new list)."""
-        if self.max_range is None:
-            return list(links)
-        return [
-            replace(l, delivered=False, drop_cause="out_of_awareness_range")
-            if l.delivered and l.distance_m > self.max_range else l
-            for l in links
-        ]
-
     def _deliver_infrastructure_messages(self, frame: int, sim_time: float) -> None:
         """Send this tick's MAP, SPAT and VRUAM from every RSU / VRU to every vehicle through
         the same DSRC channel as BSMs (own TX power for RSUs; VRU devices use the channel default).
@@ -763,20 +752,19 @@ class V2XNetwork:
 
         def transmit(key, tx_id, tx_xy, tx_power, link_type, messages, inboxes):
             n_contenders = channel._count_contenders(key, tx_xy, stations)
+            nlos_by_rx = (
+                channel.nlos_to_receivers(None, tx_xy, vehicle_pos) if channel.config.enable_nlos_model else {}
+            )
             for rx_id, rx_xy in vehicle_pos.items():
-                los_blocked = channel.config.enable_nlos_model and channel._is_nlos(
-                    None, rx_id, tx_xy, rx_xy, vehicle_pos
-                )
+                los_blocked = nlos_by_rx.get(rx_id, False)
                 for msg_type, msg, inbox in zip(("MAP", "SPAT", "VRUAM"), messages, inboxes):
                     if msg is None:
                         continue
                     link = channel.evaluate_link(
                         tx_id, rx_id, tx_xy, rx_xy, los_blocked, n_contenders,
                         msg_type=msg_type, link_type=link_type, tx_power_dbm=tx_power,
-                        frame=frame, sim_time=sim_time,
+                        frame=frame, sim_time=sim_time, awareness_range_m=self.max_range,
                     )
-                    if link.delivered and not self._in_awareness_range(link.distance_m):
-                        link = replace(link, delivered=False, drop_cause="out_of_awareness_range")
                     links.append(link)
                     if link.delivered:
                         inbox[rx_id][tx_id] = msg

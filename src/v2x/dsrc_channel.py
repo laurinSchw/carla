@@ -27,6 +27,8 @@ broker. Call broadcast_all() once per update tick, then query get_received() per
 
 import math
 import logging
+
+import numpy as np
 from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Tuple
 import random
@@ -52,7 +54,7 @@ _L0_DB = 20.0 * math.log10(4.0 * math.pi * _REFERENCE_DIST_M / _DSRC_LAMBDA)
 _CARRIER_SENSE_RANGE_M = 300.0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class LinkResult:
     """Outcome of one (transmitter, receiver, message) attempt through the channel.
 
@@ -62,7 +64,8 @@ class LinkResult:
     The two causes of a radio drop cannot be told apart after one combined draw, so it is
     labelled ``"channel_or_mac"``. ``delivered`` means "reached the receiver's application":
     when the radio delivered the packet but the network's awareness-range filter discards it,
-    the network rewrites the record to ``delivered=False, drop_cause="out_of_awareness_range"``.
+    the record says ``delivered=False, drop_cause="out_of_awareness_range"``. Records are not changed after
+    creation (not ``frozen``: frozen dataclasses cost about twice as much to build, and N stations make N² of them).
     """
     frame: int
     sim_time: float
@@ -198,6 +201,7 @@ class DSRCChannel:
         positions: Dict[int, Tuple[float, float]],
         frame: int = 0,
         sim_time: float = 0.0,
+        awareness_range_m: Optional[float] = None,
     ) -> None:
         """
         Compute channel delivery for every (sender, receiver) pair this tick.
@@ -208,6 +212,8 @@ class DSRCChannel:
                        Typically derived from bsm.x_m / bsm.y_m (CARLA metres),
                        which store CARLA world coordinates (not geodetic).
             frame, sim_time: stamped on the LinkResult records only.
+            awareness_range_m: application filter applied after the radio; affects the LinkResult
+                outcome only (``get_received`` still reports radio delivery).
 
         Call once per V2X update tick. Results are stable until the next call.
         """
@@ -221,6 +227,10 @@ class DSRCChannel:
                 continue
 
             n_contenders = self._count_contenders(sender_id, tx_pos, positions)
+            nlos_by_rx = (
+                self.nlos_to_receivers(sender_id, tx_pos, positions)
+                if self.config.enable_nlos_model else {}
+            )
 
             for receiver_id in vehicle_ids:
                 if receiver_id == sender_id:
@@ -230,17 +240,15 @@ class DSRCChannel:
                 if rx_pos is None:
                     continue
 
-                nlos = (
-                    self.config.enable_nlos_model
-                    and _euclidean(tx_pos, rx_pos) >= 0.5
-                    and self._is_nlos(sender_id, receiver_id, tx_pos, rx_pos, positions)
-                )
-                link = self.evaluate_link(
+                nlos = nlos_by_rx.get(receiver_id, False) and _euclidean(tx_pos, rx_pos) >= 0.5
+                link, radio_delivered = self._evaluate(
                     sender_id, receiver_id, tx_pos, rx_pos, nlos, n_contenders,
-                    msg_type="BSM", link_type="V2V", frame=frame, sim_time=sim_time,
+                    "BSM", "V2V", None, frame, sim_time, awareness_range_m,
                 )
-                if link.delivered:
+                if radio_delivered:
                     self._received[receiver_id][sender_id] = bsm
+                if self.config.record_links:
+                    self.last_links.append(link)
 
         self._flush_stats()
 
@@ -257,13 +265,25 @@ class DSRCChannel:
         tx_power_dbm: Optional[float] = None,
         frame: int = 0,
         sim_time: float = 0.0,
+        awareness_range_m: Optional[float] = None,
     ) -> LinkResult:
         """Decide one transmission attempt and update the channel statistics.
 
         Every message type (BSM, SPAT, MAP, VRUAM) uses this one path. ``tx_power_dbm`` is the
         transmitter's own power (OBU, RSU, VRU device); None means ``config.tx_power_dbm``.
+        ``awareness_range_m`` (None = no filter) turns a radio delivery from farther away into
+        ``delivered=False, drop_cause="out_of_awareness_range"`` in the record.
         Consumes the seeded RNG in a fixed order (one Gaussian, then one uniform draw).
         """
+        link, _ = self._evaluate(tx_id, rx_id, tx_pos, rx_pos, nlos, n_contenders, msg_type, link_type,
+                                 tx_power_dbm, frame, sim_time, awareness_range_m)
+        if self.config.record_links:
+            self.last_links.append(link)
+        return link
+
+    def _evaluate(self, tx_id, rx_id, tx_pos, rx_pos, nlos, n_contenders, msg_type, link_type,
+                  tx_power_dbm, frame, sim_time, awareness_range_m):
+        """Core of ``evaluate_link``: returns ``(record, radio_delivered)`` without storing the record."""
         cfg = self.config
         tx_power = cfg.tx_power_dbm if tx_power_dbm is None else tx_power_dbm
         distance = _euclidean(tx_pos, rx_pos)
@@ -272,29 +292,30 @@ class DSRCChannel:
         if distance < 0.5:
             # Co-located stations: deterministic delivery, no radio draw
             self.stats["total_deliveries"] += 1
-            link = LinkResult(
+            gain = tx_power + 2.0 * cfg.antenna_gain_dbi
+            return LinkResult(
                 frame, sim_time, tx_id, rx_id, msg_type, link_type, distance, True, tx_power,
-                0.0, 0.0, tx_power + 2.0 * cfg.antenna_gain_dbi,
-                tx_power + 2.0 * cfg.antenna_gain_dbi - cfg.rx_sensitivity_dbm,
-                1.0, 1.0, 1.0, True, None,
-            )
+                0.0, 0.0, gain, gain - cfg.rx_sensitivity_dbm, 1.0, 1.0, 1.0, True, None,
+            ), True
+
+        p_rx, path_loss, shadowing = self._rx_power_parts(distance, nlos, tx_power)
+        margin = p_rx - cfg.rx_sensitivity_dbm
+        self._record_margin(margin)
+        p_channel = 1.0 / (1.0 + math.exp(-cfg.prr_sigmoid_k * margin))
+        p_mac = self._csma_success_prob(n_contenders)
+        p_total = p_channel * p_mac
+        radio_delivered = self._rng.random() < p_total
+        self.stats["total_deliveries" if radio_delivered else "total_drops"] += 1
+        if not radio_delivered:
+            delivered, cause = False, "channel_or_mac"
+        elif awareness_range_m is not None and distance > awareness_range_m:
+            delivered, cause = False, "out_of_awareness_range"
         else:
-            p_rx, path_loss, shadowing = self._rx_power_parts(distance, nlos, tx_power)
-            margin = p_rx - cfg.rx_sensitivity_dbm
-            self._record_margin(margin)
-            p_channel = 1.0 / (1.0 + math.exp(-cfg.prr_sigmoid_k * margin))
-            p_mac = self._csma_success_prob(n_contenders)
-            p_total = p_channel * p_mac
-            delivered = self._rng.random() < p_total
-            self.stats["total_deliveries" if delivered else "total_drops"] += 1
-            link = LinkResult(
-                frame, sim_time, tx_id, rx_id, msg_type, link_type, distance, not nlos, tx_power,
-                path_loss, shadowing, p_rx, margin, p_channel, p_mac, p_total, delivered,
-                None if delivered else "channel_or_mac",
-            )
-        if cfg.record_links:
-            self.last_links.append(link)
-        return link
+            delivered, cause = True, None
+        return LinkResult(
+            frame, sim_time, tx_id, rx_id, msg_type, link_type, distance, not nlos, tx_power,
+            path_loss, shadowing, p_rx, margin, p_channel, p_mac, p_total, delivered, cause,
+        ), radio_delivered
 
     def get_received(self, receiver_id: int) -> Dict[int, BSMCore]:
         """
@@ -407,6 +428,49 @@ class DSRCChannel:
             if _point_to_segment_dist(pos, tx, rx) < 2.5:
                 return True
         return False
+
+    def nlos_to_receivers(
+        self,
+        sender_id,
+        tx: Tuple[float, float],
+        positions: Dict[int, Tuple[float, float]],
+        blockers: Optional[Dict[int, Tuple[float, float]]] = None,
+    ) -> Dict[int, bool]:
+        """LOS/NLOS from one transmitter to every station in ``positions``, in one vectorised pass.
+
+        Same rule as ``_is_nlos`` (another station within 2.5 m of the tx→rx segment, excluding the two ends),
+        but numpy instead of a Python loop per pair: the pairwise loop made one update cost O(N^3).
+        ``sender_id`` may be any key not present in ``positions`` (RSU, VRU). ``blockers`` defaults to ``positions``.
+        """
+        rx_ids = [i for i in positions if i != sender_id]
+        if not rx_ids:
+            return {}
+        blk = positions if blockers is None else blockers
+        blk_ids = list(blk)
+        R = np.array([positions[i] for i in rx_ids], dtype=np.float64)          # (M, 2) receivers
+        Q = np.array([blk[i] for i in blk_ids], dtype=np.float64)               # (N, 2) possible blockers
+        A = np.asarray(tx, dtype=np.float64)
+        seg = R - A                                                             # (M, 2) segment vectors
+        seg_len_sq = np.einsum("ij,ij->i", seg, seg)                            # (M,)
+        rel = Q[:, None, :] - A                                                 # (N, 1->M, 2)
+        dot = np.einsum("nmj,mj->nm", np.broadcast_to(rel, (len(Q), len(R), 2)), seg)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = np.where(seg_len_sq > 0.0, dot / seg_len_sq, 0.0)
+        t = np.clip(t, 0.0, 1.0)
+        proj = A + t[:, :, None] * seg[None, :, :]                              # (N, M, 2)
+        dist = np.hypot(Q[:, None, 0] - proj[:, :, 0], Q[:, None, 1] - proj[:, :, 1])
+        close = dist < 2.5
+        # the two ends of the link never block it
+        blk_index = {i: k for k, i in enumerate(blk_ids)}
+        for m, rid in enumerate(rx_ids):
+            k = blk_index.get(rid)
+            if k is not None:
+                close[k, m] = False
+        sk = blk_index.get(sender_id)
+        if sk is not None:
+            close[sk, :] = False
+        blocked = close.any(axis=0)
+        return {rid: bool(blocked[m]) for m, rid in enumerate(rx_ids)}
 
     def _count_contenders(
         self,

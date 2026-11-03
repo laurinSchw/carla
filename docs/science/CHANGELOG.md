@@ -263,3 +263,30 @@ kB/frame, fps). Code: `web/static/js/lidar-decoder.js` (mirrors `src/lidar/proto
 and `lidar-view.js` (canvas, no dependencies). Verified in Firefox headless with a synthetic scene streamed through the real server path.
 Not verified: behaviour with real CARLA data, fps/CPU of the 2-D canvas renderer at 50 k points on a slow device (software projection, one
 `fillRect` per point).
+
+### Live verification against CARLA 0.9.16 (Windows PC 192.168.0.104, Town10HD) and a V2X performance fix
+CARLA on that PC answers on RPC port **2002** (streaming 2003), not 2000.
+
+- **Passed live:** `tests/integration` (3), `tests/server/test_deployed_server.py` (18): telemetry measured at 4.99 Hz (documented 5 Hz),
+  LiDAR protocol-v3 frames decode (≈24.6 k points/frame at 500 k pps × 0.05 s, ≈505 kB/frame), 5 RSUs from 15 traffic lights (S7 junction
+  grouping works), and `tests/server/test_live_lidar.py`: sensor reaches *active*, **reconfigure 32 → 64 channels replaces (not adds) the
+  sensor**, frame ids are ticked frames, leaving destroys the sensor, **no leaked sensor actors** (counted on the CARLA side).
+- **Simulation rate (target 20 FPS), measured from the frame counter:** idle 19.9 · 50 vehicles + 20 pedestrians **15.1** · 1 LiDAR 20.0 ·
+  3 LiDAR (1.5 M points/s) **19.7** · 3 LiDAR + 50 vehicles + 20 pedestrians **14.4**. LiDAR was not the bottleneck; the traffic was.
+  (Not measured: per-tick p95, which the server does not expose.)
+- **Cause and fix:** with `v2x_penetration_rate = 1.0` the V2X update handles ≈ 50 stations, and the line-of-sight check made one update
+  O(N³) in pure Python (every pair tested every station). `DSRCChannel.nlos_to_receivers` now does one numpy pass per transmitter (same rule, same
+  random-draw order: golden delivery matrices unchanged, equivalence test against the scalar rule), and link records are built once instead of
+  being rewritten (`LinkResult` is no longer `frozen`). Update time on the host, N stations + 5 RSUs, with link records:
+  | N | before | after |
+  |---:|---:|---:|
+  | 25 | 21.8 ms | 9.0 ms |
+  | 50 | 113.7 ms | 30.6 ms |
+  | 100 | 615.5 ms | 142.0 ms |
+  | 200 | — | 726 ms |
+  The update runs every 10 frames, so N = 50 now costs ≈ 3 ms per frame on average. Still ~O(N²): above ≈ 100 stations lower
+  `v2x_penetration_rate` or set `DSRCConfig.record_links=False` (saves ≈ 15 %). **Not re-measured live after the fix** (see below).
+- **Memory bug found:** the CARLA LiDAR callback queued frames without limit; when the tick loop stalled the server grew to 8.4 GB. The queue now
+  keeps the newest 8 frames (`MAX_QUEUED_FRAMES`) and counts drops.
+- **Operational lesson:** two servers connected to one CARLA world both tick it (observed: idle rate doubled to 39.7 FPS, requests timed out).
+  Run exactly one server per CARLA world; the Docker container and a local `start_server.py` must not both be connected.

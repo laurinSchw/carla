@@ -111,3 +111,15 @@ def test_destroy_stops_before_destroying_and_never_sleeps():
     sensor = _FakeSensor()
     CarlaLidarHandle(sensor, LidarConfig()).destroy()
     assert sensor.events == ["stop", "destroy"]
+
+
+def test_queue_is_bounded_and_keeps_the_newest_frames_when_the_consumer_stalls():
+    """A stalled tick loop used to let the queue grow without limit (measured: several GB with 3 sensors)."""
+    from src.lidar.carla_backend import MAX_QUEUED_FRAMES
+    sensor = _FakeSensor()
+    h = CarlaLidarHandle(sensor, LidarConfig())
+    for f in range(1, 1001):
+        sensor.callback(_measurement(f, n=2))
+    assert h._queue.qsize() == MAX_QUEUED_FRAMES and h.dropped == 1000 - MAX_QUEUED_FRAMES
+    assert h.get_measurement(1000, timeout_s=0.01).frame == 1000          # newest survived
+    assert h.get_measurement(5, timeout_s=0.01) is None                    # the old ones are gone

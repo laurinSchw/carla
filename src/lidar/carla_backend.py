@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # raw layout of sensor.lidar.ray_cast_semantic (CARLA 0.9.x) and sensor.lidar.ray_cast
 _SEMANTIC_RAW = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("cos_inc", "<f4"),
                           ("object_idx", "<u4"), ("tag", "<u4")])
+MAX_QUEUED_FRAMES = 8
 _RAYCAST_RAW = np.dtype([("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("intensity", "<f4")])
 
 
@@ -27,8 +28,24 @@ class CarlaLidarHandle:
     def __init__(self, sensor, config: LidarConfig) -> None:
         self._sensor = sensor
         self._semantic = config.sensor_type == "semantic"
-        self._queue: "queue.Queue" = queue.Queue()
-        sensor.listen(self._queue.put)
+        # Bounded: if the simulation thread stalls, CARLA keeps delivering (a 25k-point semantic frame is ~600 kB),
+        # and an unbounded queue grew to several GB. Old frames are useless anyway: only the current one is read.
+        self._queue: "queue.Queue" = queue.Queue(maxsize=MAX_QUEUED_FRAMES)
+        self.dropped = 0
+        sensor.listen(self._enqueue)
+
+    def _enqueue(self, data) -> None:
+        """CARLA callback thread: keep the newest ``MAX_QUEUED_FRAMES`` measurements."""
+        while True:
+            try:
+                self._queue.put_nowait(data)
+                return
+            except queue.Full:
+                try:
+                    self._queue.get_nowait()
+                    self.dropped += 1
+                except queue.Empty:
+                    pass
 
     def get_measurement(self, frame: int, timeout_s: float) -> Optional[Measurement]:
         import time

@@ -22,7 +22,7 @@ list S1–S20/C1–C13, target architecture and phase acceptance criteria).
 | 1 Remove monolithic V2V demo plane | done | `developer` |
 | 2 Core skeleton (single sim thread owns CARLA via `SimThreadExecutor`, `WorldConfig`, locked `SessionManager`, 5 Hz WS, contract tests) | **done and merged into `developer`** (2026-11-03). Still open from the Phase 2 list: package layout `sim/`, `api/`, `config.py` (§5.2) — the code still lives in `src/server/` | `developer` |
 | 3 V2X unification | **step 1 done** (`src/v2v` merged into `src/v2x`, one `V2XNetwork`, golden output identical). Model fixes done (details and before/after numbers in `docs/science/CHANGELOG.md`): S2, C7, S17, S8, S9, S10, S11, S3 (penetration rate, D2), S7 (unverified live), S4 (MAP/SPAT/VRUAM through the channel + `LinkResult` + per-vehicle inboxes + `/admin/v2x/links`), S13 (one awareness range), S14 (TTC from velocity vectors and extents), S18/S12 (rate config, sim-time rate stat), S1/S5/S6/S15/S16/S20 documented honestly in `docs/science/model.md` (D6: no DB, run directory is the schema). Open: S5 correlated shadowing / S6 calibrated MAC / S20 buildings (need decision D5), CPM generation, ETSI CAM triggering, Phase 4+ (LiDAR rework, WS hub, frontend, recording) | `developer` |
-| 4 LiDAR on request (`src/lidar/`: protocol v3, manager, budget, REST+WS) | **done, except the live-CARLA acceptance run** (tick p95 with 3 sessions, 32→64 channel reconfigure on a real server) | `developer` |
+| 4 LiDAR on request (`src/lidar/`: protocol v3, manager, budget, REST+WS) | **done and live-verified** (reconfigure 32→64, no leaked sensors, 19.7 FPS with 3 sessions on 192.168.0.104:2002); not measured: tick p95 | `developer` |
 | 5–8 WS hub + roles, new frontend, recording, docs | not started | — |
 
 Remaining defects from the handoff list are in `REFACTOR_HANDOFF.md` §3.1 (check which are fixed by Phase 2 before touching them).
@@ -106,6 +106,12 @@ Run in the venv or container, from the repo root: `python -m pytest tests -q -m 
 - Known weak tests: `test_lidar_enhanced.py` (untracked; path bug, tests its own mocks),
   several "stored value" asserts in
   `test_v2x_messages.py`, mock vehicle/world classes duplicated across four files (needs a conftest).
+
+## 6b. Live CARLA
+The lab CARLA 0.9.16 PC is `192.168.0.104` and listens on RPC **2002** (streaming 2003); 2000 is taken by something else. Run live tests with
+`SERVER_URL=... ADMIN_TOKEN=... CARLA_HOST=192.168.0.104 CARLA_PORT=2002 pytest tests/server tests/integration -m carla`.
+**Only one server may be connected to a CARLA world** (two servers both tick it; observed 2x frame rate and timeouts). Check
+`/admin/status` of the Docker container before starting a local server, and stop servers with SIGINT so world settings are restored.
 
 ## 7. Known gaps (v2x)
 - `CPMMessage` is defined but nothing generates it.

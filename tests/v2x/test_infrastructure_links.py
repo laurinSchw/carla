@@ -139,3 +139,31 @@ def test_channel_evaluate_link_matches_broadcast_all_statistics():
     assert link.p_total == link.p_channel * link.p_mac
     assert link.rx_margin_db == link.rx_power_dbm - ch.config.rx_sensitivity_dbm
     assert ch.stats["total_broadcasts"] == 1
+
+
+def test_vectorised_nlos_matches_the_scalar_rule_on_random_and_degenerate_layouts():
+    """nlos_to_receivers() replaced a per-pair Python loop (O(N^3) per update); it must give the same answers."""
+    import random
+
+    ch = DSRCChannel(DSRCConfig())
+    rnd = random.Random(7)
+    for trial in range(30):
+        n = rnd.randint(2, 40)
+        pos = {i: (rnd.uniform(-30, 30), rnd.uniform(-30, 30)) for i in range(n)}
+        if trial % 3 == 0:                       # degenerate: co-located stations and stations on a line
+            pos[1] = pos[0]
+            for i in range(2, min(n, 8)):
+                pos[i] = (float(i) * 3.0, 0.0)
+        for sender in range(n):
+            fast = ch.nlos_to_receivers(sender, pos[sender], pos)
+            for rx in range(n):
+                if rx == sender:
+                    continue
+                assert fast[rx] == ch._is_nlos(sender, rx, pos[sender], pos[rx], pos), (trial, sender, rx)
+
+
+def test_infrastructure_sender_with_a_colliding_id_does_not_exclude_a_vehicle_blocker():
+    ch = DSRCChannel(DSRCConfig())
+    vehicles = {1: (50.0, 0.0), 2: (25.0, 0.0), 3: (100.0, 0.0)}   # vehicle 2 sits exactly between RSU "1" and vehicle 3
+    fast = ch.nlos_to_receivers(None, (0.0, 0.0), vehicles)
+    assert fast[3] is True and fast[2] is False
