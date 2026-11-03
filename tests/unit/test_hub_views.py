@@ -3,6 +3,8 @@
 Runs the real PersistentCARLAServer tick loop against the recording CARLA stub, and the real WebSocket hub through the app.
 """
 
+import concurrent.futures
+import contextlib
 import importlib
 import sys
 import time
@@ -14,6 +16,29 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from src.server.world_config import WorldConfig  # noqa: E402
 from tests.unit.carla_stub import Recorder, make_carla_module  # noqa: E402
+
+
+@contextlib.contextmanager
+def _client(app):
+    """A TestClient without the app lifespan: the lifespan stops the world, which the ``env`` fixture does anyway; entering it made
+    the exit race with the stop under load (CancelledError in TestClient.__exit__)."""
+    yield TestClient(app)
+
+
+@contextlib.contextmanager
+def _ws(client, url="/ws"):
+    """``client.websocket_connect`` that tolerates a known Starlette TestClient teardown race: under CPU load the portal future
+    of ``cs.cancel`` can already be cancelled when the socket closes (CancelledError from ``__exit__``). The server side is
+    unaffected, the assertions of the tests are made inside the block."""
+    cm = client.websocket_connect(url)
+    ws = cm.__enter__()
+    try:
+        yield ws
+    finally:
+        try:
+            cm.__exit__(None, None, None)
+        except concurrent.futures.CancelledError:
+            pass
 
 
 @pytest.fixture
@@ -115,7 +140,7 @@ def test_hub_streams_world_state_to_an_observer_over_the_websocket(env):
     # a state published before the spawn has no stations; wait for one that does
     assert _wait(lambda: (w := srv.get_world_state()) and len(w.data["stations"]) == 2)
     app_mod.set_persistent_world(srv)
-    with TestClient(app_mod.app) as client, client.websocket_connect("/ws") as ws:
+    with _client(app_mod.app) as client, _ws(client) as ws:
         ws.send_json({"op": "subscribe", "topic": "world.state", "max_hz": 5})
         seen = []
         for _ in range(6):
@@ -133,7 +158,7 @@ def test_the_hub_refuses_ground_truth_filters_and_other_vehicles_inboxes_to_a_ve
     s = _join(srv)
     _wait(lambda: srv.get_world_state())
     app_mod.set_persistent_world(srv)
-    with TestClient(app_mod.app) as client, client.websocket_connect("/ws") as ws:
+    with _client(app_mod.app) as client, _ws(client) as ws:
         ws.send_json({"op": "auth", "session_token": s.session_token})
         assert ws.receive_json()["topic"] == "auth"
         ws.send_json({"op": "subscribe", "topic": "world.state"})
@@ -149,9 +174,44 @@ def test_a_wrong_token_closes_the_socket_with_4401(env):
     from starlette.websockets import WebSocketDisconnect
     srv = env()
     app_mod.set_persistent_world(srv)
-    with TestClient(app_mod.app) as client, client.websocket_connect("/ws") as ws:
+    with _client(app_mod.app) as client, _ws(client) as ws:
         ws.send_json({"op": "auth", "session_token": "nope"})
         with pytest.raises(WebSocketDisconnect) as exc:
             for _ in range(3):
                 ws.receive_json()
         assert exc.value.code == 4401
+
+
+def test_hub_close_at_grace_zero_ends_the_session_unless_another_connection_holds_it(env):
+    import src.server.app as app_mod
+    srv = env(session_disconnect_grace_s=0.0)
+    s = _join(srv)
+    _wait(lambda: srv.get_world_state())
+    app_mod.set_persistent_world(srv)
+    with _client(app_mod.app) as client:
+        with _ws(client) as ws:
+            ws.send_json({"op": "auth", "session_token": s.session_token})
+            assert ws.receive_json()["topic"] == "auth"
+            srv.sessions.mark_connected(s.session_id)           # a second connection (e.g. /ws/client)
+        assert _wait(lambda: srv.sessions.get_session(s.session_id).ws_connections == 1)
+        assert srv.sessions.get_session(s.session_id).is_active   # still held
+        with _ws(client) as ws:
+            ws.send_json({"op": "auth", "session_token": s.session_token})
+            assert ws.receive_json()["topic"] == "auth"
+            srv.sessions.mark_disconnected(s.session_id)         # the other one closes first
+        # the hub was the last connection: session ended, vehicle gone
+        assert _wait(lambda: not srv.sessions.get_session(s.session_id).is_active)
+        assert _wait(lambda: s.session_id not in srv._client_vehicles)
+
+
+def test_hub_close_with_grace_keeps_the_session(env):
+    import src.server.app as app_mod
+    srv = env(session_disconnect_grace_s=30.0)
+    s = _join(srv)
+    app_mod.set_persistent_world(srv)
+    with _client(app_mod.app) as client:
+        with _ws(client) as ws:
+            ws.send_json({"op": "auth", "session_token": s.session_token})
+            assert ws.receive_json()["topic"] == "auth"
+        assert _wait(lambda: srv.sessions.get_session(s.session_id).ws_connections == 0)
+        assert srv.sessions.get_session(s.session_id).is_active and s.session_id in srv._client_vehicles

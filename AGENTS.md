@@ -64,7 +64,7 @@ cp .env.example .env            # set ADMIN_TOKEN (compose refuses to start with
 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build frontend    # the sha names recorded runs
 # http://localhost:8000   /admin (token)   /observer, /vehicle (open)    recorded runs appear in ./runs/
 ```
-Local: `python start_server.py [--live --carla-host H --carla-port 2002 --admin-token T --port 8000 --no-v2x --v2x-range 75
+Local: `python start_server.py [--live --carla-host H --carla-port 2002  (or env CARLA_HOST / CARLA_PORT) --admin-token T --port 8000 --no-v2x --v2x-range 75
 --v2x-rate 2 --v2x-penetration 1.0 --seed 42 --no-drivers --v2x-advisory --tm-port 8001]`. Without `--live` only the web UI runs;
 the admin connects CARLA from `/admin` or `POST /admin/connect`. Run from the repo root. The image is Python 3.10.
 
@@ -113,7 +113,7 @@ sensors appear; live tests count only their own.
 - Drivers: profiles are project defaults, not calibrated; no destination-driven routing (`set_route` / `set_path` exist in the live TM but need a route planner).
 - Recording: gzip links grow with the square of the V2X stations (≈ 6 MB/minute at 25 vehicles + 5 RSUs); runs are owned by root when written by the container.
 - LiDAR wire format is v4 since 2026-11-03; raw LiDAR recorded earlier is v3 (other bit layout) and is rejected by the readers, there is no v3 reader.
-- Open decisions: hub vs `/ws/client` behaviour at grace 0; whether `/client/*` should require the session token; which sensors a vehicle may view with `observer_public=false` (now: its own only).
+- Hub and `/ws/client` both end a session at once at grace 0 when its last connection closes (`end_session_if_unheld`). CARLA host/port come from `--carla-host/--carla-port` or `CARLA_HOST/CARLA_PORT` (no built-in host). Open decisions: whether `/client/*` should require the session token; which sensors a vehicle may view with `observer_public=false` (now: its own only).
 - Untracked work files of the owner (hidden from `git add <dir>` by `.git/info/exclude`; never commit them without asking): `collector_enhanced.py` (depends on the removed
   collector), `tests/test_lidar_enhanced.py` (tests its own mocks), root stress/accuracy scripts, `STRESS_*`/`LIDAR_*` summaries, `docs/LIDAR_SERVER_IMPLEMENTATION.md` (old LiDAR design).
 

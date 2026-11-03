@@ -287,28 +287,22 @@ async def _client_ws_closed(session_id: str) -> None:
     if world is None:
         return
     world.sessions.mark_disconnected(session_id)
-    grace = float(getattr(world, "session_disconnect_grace_s", 0.0))
     session = world.sessions.get_session(session_id)
     if session is None or not session.is_active:
         return
-    if grace > 0:
-        # the simulation thread (_remove_disconnected_sessions) removes it if nobody reconnects in time
-        logger.info("Client WS closed: session=%s kept for %.0f s", session_id, grace)
+    # grace > 0: the simulation thread removes it if nobody reconnects in time; grace 0: ended here. The despawn is queued
+    # before the first await and shielded: if this task is cancelled the vehicle of an ended session must still be removed.
+    fut = world.end_session_if_unheld(session_id) if hasattr(world, "end_session_if_unheld") else None
+    if fut is None:
+        logger.info("Client WS closed: session=%s kept (grace %.0f s or held by another connection)", session_id,
+                    float(getattr(world, "session_disconnect_grace_s", 0.0)))
         return
-    if session.ws_connections > 0:
-        logger.info("Client WS closed: session=%s still held by another connection", session_id)
-        return
-    # End the session and queue the despawn before the first await. The despawn is shielded: if this task is
-    # cancelled (the server tears the connection task down), the queued despawn must still run, otherwise the
-    # vehicle of an ended session would stay in CARLA with nothing left to remove it.
-    world.sessions.end_session(session_id)
     try:
-        await asyncio.shield(asyncio.wrap_future(world.submit(world.despawn_client_vehicle, session_id)))
+        await asyncio.shield(asyncio.wrap_future(fut))
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # world may have stopped meanwhile
         logger.warning("Cleanup of session %s skipped: %s", session_id, exc)
-    logger.info("Auto-cleaned session %s after WS close (grace 0)", session_id)
 
 
 # ------------------------------------------------------------------ #

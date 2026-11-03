@@ -1,4 +1,4 @@
-// ETSI EN 302 637-3 cause codes as the server's DENMCauseCode enum has them (src/v2x/messages/denm.py).
+// ETSI EN 302 637-3 cause codes as the server's DENMCauseCode enum has them (src/v2x/safety_messages.py).
 // A Node test compares this list with the Python enum, so they cannot drift apart.
 export const DENM_CAUSES = [
   [0, 'RESERVED'],

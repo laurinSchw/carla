@@ -9,6 +9,7 @@ from __future__ import annotations
 import collections
 import logging
 import time
+from concurrent.futures import Future
 from typing import Any, Dict, Optional
 
 from src.server.events import EventLog
@@ -137,6 +138,24 @@ class HubViewsMixin:
         return self._run_status
 
     # -- sessions whose WebSocket closed (decision D4) --------------------------------------------------
+    def end_session_if_unheld(self, session_id: str) -> Optional[Future]:
+        """Grace 0 ("remove at once"): end a session whose last connection (hub or /ws/client) just closed and queue the despawn
+        of its vehicle. Any thread; returns the despawn future (None when nothing was done). With grace > 0 the simulation thread
+        removes the session later (``_remove_disconnected_sessions``)."""
+        if self.session_disconnect_grace_s > 0:
+            return None
+        session = self.sessions.get_session(session_id)
+        if session is None or not session.is_active or session.ws_connections > 0:
+            return None
+        self.sessions.end_session(session_id)
+        try:
+            fut = self.submit(self.despawn_client_vehicle, session_id)
+        except RuntimeError as exc:                     # world stopping
+            logger.warning("Cleanup of session %s skipped: %s", session_id, exc)
+            return None
+        logger.info("Session %s ended: last connection closed and grace is 0", session_id)
+        return fut
+
     def _remove_disconnected_sessions(self) -> None:
         """Called with the periodic session check on the simulation thread."""
         self.sessions.prune_ended()

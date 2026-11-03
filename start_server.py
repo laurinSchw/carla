@@ -7,15 +7,15 @@ Usage (demo / frontend-only mode):
 
 Usage (live server mode — requires a running CARLA instance):
     python start_server.py \\
-        --carla-host 192.168.1.110 \\
+        --carla-host <carla-pc-ip> \\
         --admin-token mysecret \\
         --live
 
 Options
 -------
 --live              Start the persistent CARLA world immediately.
---carla-host HOST   IP of the CARLA server  (default: 192.168.1.110)
---carla-port PORT   CARLA server port        (default: 2000)
+--carla-host HOST   IP of the CARLA server  (default: env CARLA_HOST; required with --live)
+--carla-port PORT   CARLA server port        (default: env CARLA_PORT, else 2000)
 --admin-token TOKEN Admin API token          (default: read from ADMIN_TOKEN env)
 --port PORT         Web server port          (default: 8000)
 --no-v2x            Disable the V2X network
@@ -57,10 +57,10 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--live", action="store_true",
                    help="Start persistent CARLA world on launch")
-    p.add_argument("--carla-host", default="192.168.1.110",
-                   help="CARLA server IP address")
-    p.add_argument("--carla-port", type=int, default=2000,
-                   help="CARLA server port")
+    p.add_argument("--carla-host", default=None,
+                   help="CARLA server IP address (default: env CARLA_HOST; required with --live)")
+    p.add_argument("--carla-port", type=int, default=None,
+                   help="CARLA server RPC port (default: env CARLA_PORT, else 2000)")
     p.add_argument("--admin-token", default=None,
                    help="Secret token for the /admin API (overrides ADMIN_TOKEN env var)")
     p.add_argument("--port", type=int, default=8000,
@@ -93,14 +93,34 @@ def _parse_args() -> argparse.Namespace:
 # Main
 # ---------------------------------------------------------------------------
 
+def resolve_carla_endpoint(host_arg, port_arg, env):
+    """CARLA host and port: command line first, then CARLA_HOST / CARLA_PORT, port finally CARLA's own default 2000.
+    There is no default host (it differs per lab); ``host`` is None when neither is given. Raises ValueError for a bad port."""
+    host = host_arg or env.get("CARLA_HOST") or None
+    raw = port_arg if port_arg is not None else (env.get("CARLA_PORT") or 2000)
+    try:
+        port = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"CARLA port must be a number, got {raw!r}")
+    if not 1 <= port <= 65535:
+        raise ValueError(f"CARLA port out of range: {port}")
+    return host, port
+
+
 def main() -> None:
     args = _parse_args()
+    try:
+        args.carla_host, args.carla_port = resolve_carla_endpoint(args.carla_host, args.carla_port, os.environ)
+    except ValueError as exc:
+        raise SystemExit(f"error: {exc}")
     if args.fake:
         # must happen before anything imports ``carla``; production paths never import src.testing
         from src.testing.fake_carla import install
         install(args.fake_seed)
         args.live = True
         args.carla_host = "fake"
+    if args.live and not args.carla_host:
+        raise SystemExit("error: --live needs a CARLA host: pass --carla-host HOST or set CARLA_HOST (port: --carla-port / CARLA_PORT, default 2000)")
     from src.server.app import run_server, set_persistent_world
 
     # --- Admin token --------------------------------------------------------
@@ -121,7 +141,7 @@ def main() -> None:
     print(sep)
     print(f"  Web server   : http://{args.host}:{args.port}")
     print(f"  Admin panel  : http://localhost:{args.port}/admin   (token required)")
-    print(f"  Client join  : http://localhost:{args.port}/client  (open)")
+    print(f"  Client join  : http://localhost:{args.port}/vehicle (open),  /observer")
     print(f"  Admin token  : {token}")
     if args.fake:
         print("  CARLA        : FAKE - a synthetic world, not a simulator (see src/testing/fake_carla)")

@@ -283,7 +283,11 @@ class Connection:
             self._session_id = None
 
     def on_close(self) -> None:
+        session_id = self._session_id
         self._release_session()
+        end = getattr(self.hub.source, "end_session_if_unheld", None)
+        if session_id is not None and end is not None:
+            end(session_id)                     # grace 0: the last connection closing ends the session
 
 
 def _is_disconnect(exc: BaseException) -> bool:
