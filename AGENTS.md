@@ -21,7 +21,7 @@ list S1–S20/C1–C13, target architecture and phase acceptance criteria).
 | 0 Safety net (golden tests, lazy `import carla`) | done | `developer` |
 | 1 Remove monolithic V2V demo plane | done | `developer` |
 | 2 Core skeleton (single sim thread owns CARLA via `SimThreadExecutor`, `WorldConfig`, locked `SessionManager`, 5 Hz WS, contract tests) | **done and merged into `developer`** (2026-11-03). Still open from the Phase 2 list: package layout `sim/`, `api/`, `config.py` (§5.2) — the code still lives in `src/server/` | `developer` |
-| 3 V2X unification | **step 1 done** (`src/v2v` merged into `src/v2x`, one `V2XNetwork`, golden output identical). Model fixes done so far: S2 yaw rate, C7 2 Hz gate, S17 SPAT timing (see `docs/science/CHANGELOG.md`). Open: S3 (penetration rate), S4 (MAP/SPAT/VRUAM through the channel), S7 (RSU grouping), S8 (x_m/y_m fields), S9–S11, S13, S14, S18, channel docs `docs/science/model.md`, `LinkResult` | `developer` |
+| 3 V2X unification | **step 1 done** (`src/v2v` merged into `src/v2x`, one `V2XNetwork`, golden output identical). Model fixes done so far (details and before/after numbers in `docs/science/CHANGELOG.md`): S2 yaw rate, C7 2 Hz gate, S17 SPAT timing, S8 `x_m/y_m/z_m` rename, S9 snapshot accelerations, S10 skip stations missing from the snapshot, S11 cached steer limit, S3 background-vehicle penetration rate (default 1.0, D2), S7 one RSU per junction group (unverified on live CARLA), D6 (no DB; run directory is the schema). Open: S4 (MAP/SPAT/VRUAM through the channel), S5/S6/S1 channel honesty + `docs/science/model.md`, S13 one range semantics, S14 TTC, S18 configurable rate, `LinkResult` | `developer` |
 | 4–8 LiDAR rework, WS hub, new frontend, recording, docs | not started | — |
 
 Remaining defects from the handoff list are in `REFACTOR_HANDOFF.md` §3.1 (check which are fixed by Phase 2 before touching them).
@@ -100,7 +100,7 @@ Run in the venv or container, from the repo root: `python -m pytest tests -q -m 
 - `tests/unit/` — CSMA pins, LiDAR protocol. `tests/test_v2v_lidar.py` — collector transforms.
 - `tests/contract/` — API contract tests against `FakeWorld` (no CARLA). `tests/unit/test_sim_executor.py`, `test_persistent_world_threading.py`, `test_world_config.py` — Phase 2 threading.
   `tests/integration/` (`carla`) and `tests/server/` (`server`) — live/deployed smoke tests.
-- Baseline (host, `.venv`, `-m "not carla"`): 261 passed, 11 skipped, 5 xfailed (strict, stale by design: CSMA drops at N=100,
+- Baseline (host, `.venv`, `-m "not carla"`): 270 passed, 11 skipped, 5 xfailed (strict, stale by design: CSMA drops at N=100,
   neighbour tests that never call `broadcast_all`).
 - Known weak tests: `test_lidar_enhanced.py` (untracked; path bug, tests its own mocks),
   rotation/JSON tests in `test_v2v_lidar.py`, several "stored value" asserts in
@@ -108,6 +108,7 @@ Run in the venv or container, from the repo root: `python -m pytest tests -q -m 
 
 ## 7. Known gaps (v2x)
 - `CPMMessage` is defined but nothing generates it.
+- Live-CARLA verification is still missing for S2, S7, S9 (`ActorSnapshot.get_acceleration`, `get_group_traffic_lights`) and for N² channel cost with penetration 1.0.
 - MAP/SPAT/VRUAM bypass the DSRC channel (no loss/latency); only BSM goes through it.
 - `admin_routes.py` / `persistent_world.py` reach into private `_rsus`/`_vrus` via `getattr`.
 - `binary_protocol.py` is still the V1/V2-style format (v3 planned, handoff §5.4).
