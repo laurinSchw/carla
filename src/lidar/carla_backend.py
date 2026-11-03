@@ -27,7 +27,7 @@ class CarlaLidarHandle:
 
     def __init__(self, sensor, config: LidarConfig) -> None:
         self._sensor = sensor
-        self._semantic = config.sensor_type == "semantic"
+        self._semantic = config.sensor_type == "ray_cast_semantic"
         # Bounded: if the simulation thread stalls, CARLA keeps delivering (a 25k-point semantic frame is ~600 kB),
         # and an unbounded queue grew to several GB. Old frames are useless anyway: only the current one is read.
         self._queue: "queue.Queue" = queue.Queue(maxsize=MAX_QUEUED_FRAMES)

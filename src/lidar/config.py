@@ -6,13 +6,11 @@ from typing import Dict, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SemanticType = "semantic"  # sensor.lidar.ray_cast_semantic
-RaycastType = "raycast"    # sensor.lidar.ray_cast
+SENSOR_SEMANTIC = "ray_cast_semantic"  # sensor.lidar.ray_cast_semantic: tag + hit actor id, no intensity/noise
+SENSOR_RAYCAST = "ray_cast"            # sensor.lidar.ray_cast: intensity, noise/dropoff, no tags
+SensorType = Literal["ray_cast_semantic", "ray_cast"]
 
-BLUEPRINT_IDS = {
-    "semantic": "sensor.lidar.ray_cast_semantic",
-    "raycast": "sensor.lidar.ray_cast",
-}
+BLUEPRINT_IDS = {t: f"sensor.lidar.{t}" for t in (SENSOR_SEMANTIC, SENSOR_RAYCAST)}
 
 #: attributes that exist only on sensor.lidar.ray_cast (not on the semantic sensor); names as in the CARLA 0.9.x
 #: blueprint library — to be verified against 0.9.16 on a live server
@@ -23,21 +21,21 @@ RAYCAST_ONLY = ("noise_stddev", "dropoff_general_rate", "dropoff_intensity_limit
 class Mount(BaseModel):
     """Sensor pose relative to the vehicle (CARLA frame: x forward, y right, z up; degrees)."""
     model_config = ConfigDict(extra="forbid", frozen=True)
-    x_m: float = 0.0
-    y_m: float = 0.0
-    z_m: float = Field(default=2.4, ge=0.0, le=5.0)
+    x_m: float = Field(default=0.0, ge=-10.0, le=10.0)
+    y_m: float = Field(default=0.0, ge=-10.0, le=10.0)
+    z_m: float = Field(default=2.4, ge=-1.0, le=10.0)      # roof
     pitch_deg: float = Field(default=0.0, ge=-90.0, le=90.0)
     yaw_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
-    roll_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    roll_deg: float = Field(default=0.0, ge=-90.0, le=90.0)
 
 
 class LidarConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    sensor_type: Literal["semantic", "raycast"] = "semantic"
-    channels: int = Field(default=32, ge=1, le=128)
-    range_m: float = Field(default=100.0, gt=0.0, le=200.0)
-    points_per_second: int = Field(default=500_000, ge=1_000, le=5_000_000)
+    sensor_type: SensorType = SENSOR_SEMANTIC
+    channels: int = Field(default=32, ge=1, le=256)
+    range_m: float = Field(default=100.0, gt=0.0, le=300.0)
+    points_per_second: int = Field(default=500_000, ge=1_000, le=10_000_000)
     #: None = one full sweep per simulation step, i.e. 1 / fixed_delta_seconds (resolved by ``resolve``)
     rotation_frequency_hz: Optional[float] = Field(default=None, gt=0.0, le=100.0)
     upper_fov_deg: float = Field(default=15.0, ge=-90.0, le=90.0)
@@ -46,20 +44,20 @@ class LidarConfig(BaseModel):
     mount: Mount = Field(default_factory=Mount)
 
     # sensor.lidar.ray_cast only
-    noise_stddev: Optional[float] = Field(default=None, ge=0.0)
+    noise_stddev: Optional[float] = Field(default=None, ge=0.0, le=10.0)
     dropoff_general_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     dropoff_intensity_limit: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     dropoff_zero_intensity: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    atmosphere_attenuation_rate: Optional[float] = Field(default=None, ge=0.0)
+    atmosphere_attenuation_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def _rules(self) -> "LidarConfig":
         if self.lower_fov_deg >= self.upper_fov_deg:
             raise ValueError("lower_fov_deg must be below upper_fov_deg")
-        if self.sensor_type == "semantic":
+        if self.sensor_type == SENSOR_SEMANTIC:
             used = [n for n in RAYCAST_ONLY if getattr(self, n) is not None]
             if used:
-                raise ValueError(f"{used} exist only on sensor.lidar.ray_cast, not on the semantic sensor")
+                raise ValueError(f"{used} exist only on sensor type 'ray_cast', not on 'ray_cast_semantic'")
         return self
 
     # -- derived -------------------------------------------------------------------------------
@@ -95,7 +93,7 @@ class LidarConfig(BaseModel):
             "lower_fov": self.lower_fov_deg,
             "horizontal_fov": self.horizontal_fov_deg,
         }
-        if self.sensor_type == "raycast":
+        if self.sensor_type == SENSOR_RAYCAST:
             for n in RAYCAST_ONLY:
                 if getattr(self, n) is not None:
                     attrs[n] = getattr(self, n)
@@ -132,24 +130,55 @@ SEMANTIC_TAGS = (
 )
 
 
-def lidar_schema() -> dict:
-    """JSON-friendly description of the valid settings per sensor type, for UIs (``GET /api/lidar/schema``)."""
-    common = LidarConfig.model_json_schema()["properties"]
+def _attr(name, label, kind, unit, lo, hi, default, types):
+    return {"name": name, "label": label, "type": kind, "unit": unit, "min": lo, "max": hi,
+            "default": default, "sensor_types": list(types)}
+
+
+def lidar_schema(limits: Optional[Dict[str, Any]] = None) -> dict:
+    """JSON description of what can be configured, per sensor type, plus the semantic tag table; the web UI builds its
+    LiDAR forms from it. Only attributes valid for a sensor type are listed under it. Names and ranges follow CARLA 0.9.x and
+    are unverified against 0.9.16."""
+    both = (SENSOR_SEMANTIC, SENSOR_RAYCAST)
+    d, m = LidarConfig(), Mount()
+    common = [
+        _attr("channels", "Channels", "int", "", 1, 256, d.channels, both),
+        _attr("range_m", "Range", "float", "m", 0.0, 300.0, d.range_m, both),
+        _attr("points_per_second", "Points per second", "int", "pt/s", 1_000, 10_000_000, d.points_per_second, both),
+        _attr("rotation_frequency_hz", "Rotation frequency", "float", "Hz", 0.0, 100.0, 20.0, both),
+        _attr("upper_fov_deg", "Upper FOV", "float", "deg", -90, 90, d.upper_fov_deg, both),
+        _attr("lower_fov_deg", "Lower FOV", "float", "deg", -90, 90, d.lower_fov_deg, both),
+        _attr("horizontal_fov_deg", "Horizontal FOV", "float", "deg", 0.0, 360.0, d.horizontal_fov_deg, both),
+    ]
+    mount = [
+        _attr("mount.x_m", "Mount x", "float", "m", -10, 10, m.x_m, both),
+        _attr("mount.y_m", "Mount y", "float", "m", -10, 10, m.y_m, both),
+        _attr("mount.z_m", "Mount z", "float", "m", -1, 10, m.z_m, both),
+        _attr("mount.pitch_deg", "Mount pitch", "float", "deg", -90, 90, m.pitch_deg, both),
+        _attr("mount.yaw_deg", "Mount yaw", "float", "deg", -180, 180, m.yaw_deg, both),
+        _attr("mount.roll_deg", "Mount roll", "float", "deg", -90, 90, m.roll_deg, both),
+    ]
+    ray = (SENSOR_RAYCAST,)
+    raycast_only = [
+        _attr("noise_stddev", "Noise std", "float", "m", 0.0, 10.0, None, ray),
+        _attr("dropoff_general_rate", "General dropoff rate", "float", "", 0.0, 1.0, None, ray),
+        _attr("dropoff_intensity_limit", "Dropoff intensity limit", "float", "", 0.0, 1.0, None, ray),
+        _attr("dropoff_zero_intensity", "Dropoff at zero intensity", "float", "", 0.0, 1.0, None, ray),
+        _attr("atmosphere_attenuation_rate", "Atmosphere attenuation", "float", "1/m", 0.0, 1.0, None, ray),
+    ]
+
+    def for_type(t):
+        return [a for a in common + mount + raycast_only if t in a["sensor_types"]]
+
     return {
+        "protocol_version": 3,
         "sensor_types": {
-            "semantic": {
-                "blueprint": BLUEPRINT_IDS["semantic"],
-                "output": ["x", "y", "z", "cos_inc", "object_idx", "tag"],
-                "attributes": [k for k in common if k not in RAYCAST_ONLY and k != "sensor_type"],
-            },
-            "raycast": {
-                "blueprint": BLUEPRINT_IDS["raycast"],
-                "output": ["x", "y", "z", "intensity"],
-                "attributes": [k for k in common if k != "sensor_type"],
-            },
+            SENSOR_SEMANTIC: {"label": "Semantic LiDAR", "blueprint": BLUEPRINT_IDS[SENSOR_SEMANTIC],
+                              "attributes": for_type(SENSOR_SEMANTIC), "point_fields": ["tag", "object_idx", "cos_inc"]},
+            SENSOR_RAYCAST: {"label": "LiDAR (intensity)", "blueprint": BLUEPRINT_IDS[SENSOR_RAYCAST],
+                             "attributes": for_type(SENSOR_RAYCAST), "point_fields": ["intensity"]},
         },
-        "properties": common,
-        "stream_point_buckets": list(POINT_BUCKETS) + ["all"],
         "semantic_tags": [{"id": i, "name": n, "color": list(c)} for i, n, c in SEMANTIC_TAGS],
-        "note": "Attribute names and valid ranges follow CARLA 0.9.x and are unverified against 0.9.16.",
+        "stream_point_buckets": list(POINT_BUCKETS) + ["all"],
+        "limits": limits or {},
     }

@@ -240,7 +240,7 @@ async function connectWorld() {
   btn.textContent = 'Connecting…';
 
   const r = await api('POST', '/admin/connect', {
-    carla_host: host, carla_port: port, v2x_range: range, v2x_enabled: true,
+    carla_host: host, carla_port: port, awareness_range_m: range, v2x_enabled: true,
   });
   if (r) {
     toast(r.message, 'ok');

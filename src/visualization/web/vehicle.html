@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vehicle - CARLA V2X</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+<script type="importmap">{"imports": {"three": "/static/vendor/three/three.module.min.js"}}</script>
+</head>
+<body>
+<header id="top"></header>
+<main class="layout" style="grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);">
+  <section class="panel" id="join-panel" style="grid-column: 1 / -1; max-width: 40rem;" aria-labelledby="join-h">
+    <h2 id="join-h">Join as a vehicle</h2>
+    <p>You get one vehicle on autopilot. You see what <em>your radio received</em>, never the ground truth of other stations.</p>
+    <form id="join-form" autocomplete="off">
+      <div class="field"><label for="j-name">Name</label><input id="j-name" required maxlength="64" value="my-vehicle"><span></span></div>
+      <div class="field"><label for="j-bp">Vehicle</label><select id="j-bp"></select><span></span></div>
+      <div class="field"><label for="j-dur">Duration (s)</label><input id="j-dur" type="number" min="10" max="86400" placeholder="until I leave"><span></span></div>
+      <div class="field"><label for="j-lidar">LiDAR</label><label><input id="j-lidar" type="checkbox"> request a LiDAR on join</label><span></span></div>
+      <button class="primary" id="join-btn">Join</button>
+    </form>
+  </section>
+
+  <div class="col" id="app-left" hidden>
+    <section class="panel" aria-labelledby="lidar-h">
+      <header><h2 id="lidar-h">LiDAR</h2><span id="lidar-badge" class="badge" role="status">off</span></header>
+      <div id="lidar-view"></div>
+      <div id="lidar-off" class="empty">No LiDAR on your vehicle. Request one below; it is a costly resource and is released automatically about 10 s after nobody watches it.</div>
+      <details id="lidar-config" open><summary>Sensor settings</summary><div id="lidar-form"></div>
+        <div class="row"><button id="lidar-request" class="primary">Request LiDAR</button><button id="lidar-apply" hidden>Apply (respawns the sensor)</button><button id="lidar-release" class="danger" hidden>Release</button></div>
+        <p class="stamp" id="lidar-budget"></p></details>
+    </section>
+    <section class="panel" aria-labelledby="map-h">
+      <header><h2 id="map-h">Map (your perspective)</h2><label><input type="checkbox" id="follow" checked> follow me</label></header>
+      <div class="mapwrap"><canvas id="map" class="map" style="height: 360px;"></canvas></div>
+      <p class="stamp">Other stations are drawn where the messages you received say they are, with the age of that information. Ghosts: not heard in the latest update.</p>
+    </section>
+  </div>
+  <div class="col" id="app-right" hidden>
+    <section class="panel" aria-labelledby="me-h">
+      <header><h2 id="me-h">My vehicle</h2><button id="leave" class="danger">Leave</button></header>
+      <p id="conn-banner" class="stale" hidden></p>
+      <dl class="kv" id="me"></dl>
+    </section>
+    <section class="panel" aria-labelledby="radio-h">
+      <header><h2 id="radio-h">My radio</h2><span class="stamp" id="radio-stamp"></span></header>
+      <div id="radio"></div>
+    </section>
+  </div>
+</main>
+<script type="module" src="/static/js/vehicle.js"></script>
+</body>
+</html>

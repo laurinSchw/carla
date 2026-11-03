@@ -48,6 +48,7 @@ from src.traffic.advisory import V2XAdvisory, hazard_is_relevant
 from src.traffic.drivers import DriverAssigner, DriverProfile, apply_profile
 from src.recording.recorder import RunAlreadyRecording, RunRecorder, list_runs
 from src.server.route_utils import ConflictError
+from src.server.hub_views import HubViewsMixin
 from src.server.session_manager import SessionManager
 from src.server.sim_executor import SimThreadExecutor
 from src.server.world_config import WorldConfig
@@ -87,7 +88,7 @@ def _git_sha() -> str:
     return _GIT_SHA
 
 
-class PersistentCARLAServer:
+class PersistentCARLAServer(HubViewsMixin):
     """
     Manages a persistent CARLA world that runs indefinitely.
 
@@ -117,6 +118,7 @@ class PersistentCARLAServer:
         # run recording (one at a time); created by start_run()
         self.recorder: Optional[RunRecorder] = None
         self._stopped = False
+        self._init_hub_views(config)
         self._sim_time = 0.0  # simulation time of the last tick (stamps recorded events)
 
         # CARLA handles
@@ -234,6 +236,9 @@ class PersistentCARLAServer:
         # every LiDAR event silently disappear): rename it
         self.lidar.add_event_listener(
             lambda ev: self._record_event("lidar", **{("lidar_frame" if k == "frame" else k): v for k, v in ev.items()}))
+        self.lidar.add_event_listener(
+            lambda ev: self.events.add("lidar_" + ev["state"], frame=ev["frame"], sim_time=self._sim_time,
+                                       sensor_id=ev["sensor_id"], actor_id=ev["actor_id"], reason=ev["reason"]))
         self.lidar.add_raw_listener(lambda info, lf: self.recorder.lidar_frame(info, lf) if self.recorder else None)
 
         # V2X network (V2V + V2I RSU + V2P VRU)
@@ -346,6 +351,7 @@ class PersistentCARLAServer:
                 self._lidar_tick(snapshot)
                 t_c = time.monotonic()
                 self._run_periodic_work(snapshot, every_n)
+                self._publish_hub_views(snapshot, tick_start)
                 self._timing["world_tick"].append((t_b - t_a) * 1000.0)
                 self._timing["lidar"].append((t_c - t_b) * 1000.0)
 
@@ -385,6 +391,7 @@ class PersistentCARLAServer:
                     self._publish_v2x()
                     self._timing["v2x_update"].append((t1 - t0) * 1000.0)
                     self._timing["v2x_publish"].append((time.monotonic() - t1) * 1000.0)
+                    self._publish_v2x_frame()
                     updated = True
                 except Exception:
                     logger.exception("V2X update failed at frame %d (simulation continues)", self._frame)
@@ -438,8 +445,10 @@ class PersistentCARLAServer:
             logger.info("Session %s expired — removing vehicle", session.session_id)
             self._despawn_client_vehicle(session.session_id)
             self.sessions.end_session(session.session_id)
+            self._event("session_expired", client=session.client_name, actor_id=session.vehicle_actor_id)
             if self.on_session_expired:
                 self.on_session_expired(session.session_id)
+        self._remove_disconnected_sessions()
 
     # ------------------------------------------------------------------ #
     # Admin — background traffic  (simulation thread only: use submit())  #
@@ -502,6 +511,7 @@ class PersistentCARLAServer:
             except Exception:
                 logger.exception("setting up background vehicle %s failed (it stays tracked)", getattr(actor, "id", "?"))
         spawned = len(new_actors)
+        self._event("traffic_spawned", requested=count, spawned=spawned)
 
         logger.info("Spawned %d / %d background vehicles", spawned, count)
         return spawned
@@ -565,6 +575,7 @@ class PersistentCARLAServer:
                                                sim_time=self._sim_time, **kwargs)
         info = self._hazard_info(denm)
         self._record_event("hazard_publish", **info)
+        self._event("denm_injected", **info)
         return info
 
     def clear_hazard(self, station_id: int) -> bool:
@@ -678,6 +689,7 @@ class PersistentCARLAServer:
             for ped in ped_actors:
                 self.v2x_network.register_vru(ped.id, ped, VRUProfile.PEDESTRIAN)
         self._record_event("spawn_pedestrians", requested=count, spawned=spawned)
+        self._event("pedestrians_spawned", requested=count, spawned=spawned)
         logger.info("Spawned %d / %d pedestrians", spawned, count)
         return spawned
 
@@ -749,6 +761,7 @@ class PersistentCARLAServer:
         self._client_vehicles[session_id] = actor
         session.vehicle_actor_id = actor.id
         self._record_event("client_join", session_id=session_id, actor_id=actor.id, blueprint=blueprint_id)
+        self._event("session_joined", client=session.client_name, actor_id=actor.id, blueprint=blueprint_id)
 
         # Publish a first telemetry sample now so the joining client can read it at once
         # (the next per-frame publish replaces it).

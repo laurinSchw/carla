@@ -83,6 +83,7 @@ class JoinRequest(BaseModel):
 
 class JoinResponse(BaseModel):
     session_id: str
+    session_token: str  # secret for the WebSocket hub and LiDAR requests: send it in the first hub message or the X-Session-Token header, never in a URL
     actor_id: int
     ws_url: str
     lidar_ws_url: Optional[str] = None
@@ -152,6 +153,7 @@ async def join_server(req: JoinRequest, request: Request):
 
     return JoinResponse(
         session_id=session.session_id,
+        session_token=session.session_token,
         actor_id=actor_id,
         ws_url=f"/ws/client/{session.session_id}",
         lidar_ws_url=lidar_ws_url,

@@ -19,13 +19,11 @@ from dataclasses import asdict
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Header, Depends, Query
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from src.recording.recorder import RunAlreadyRecording
 from src.server.route_utils import ConflictError, on_sim_thread
 from src.server.world_config import WorldConfig
-from src.traffic.advisory import AdvisoryConfig
-from src.traffic.drivers import DriverMix
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +51,15 @@ def set_server_module(mod) -> None:
 # Auth dependency                                                     #
 # ------------------------------------------------------------------ #
 
+def check_admin_token(token: str) -> None:
+    """Raise 403 if ``token`` is not ADMIN_TOKEN (500 if the server has none). Shared by the hub and API routes."""
+    expected = os.environ.get("ADMIN_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=500, detail="ADMIN_TOKEN is not configured on the server")
+    if token != expected:
+        raise HTTPException(status_code=403, detail="Invalid admin token")
+
+
 def _require_admin(x_admin_token: str = Header(..., alias="X-Admin-Token")):
     """Raise 403 if the token does not match ADMIN_TOKEN env var."""
     expected = os.environ.get("ADMIN_TOKEN", "")
@@ -72,27 +79,23 @@ class TrafficRequest(BaseModel):
 class PedestrianRequest(BaseModel):
     count: int = Field(default=15, ge=1, le=100)
 
-class DriverMixRequest(BaseModel):
-    """Share of each driver archetype in the background traffic (normalised; not all zero)."""
-    model_config = ConfigDict(extra="forbid")
-    cautious: float = Field(default=0.2, ge=0.0, allow_inf_nan=False)
-    normal: float = Field(default=0.6, ge=0.0, allow_inf_nan=False)
-    aggressive: float = Field(default=0.2, ge=0.0, allow_inf_nan=False)
+# Fields of WorldConfig that are not part of a connect request (set by the server itself)
+_NOT_REQUESTABLE = ("host", "port", "web_port", "runs_dir")
 
 
-class ConnectRequest(BaseModel):
-    carla_host: str = Field(default="192.168.1.110")
-    carla_port: int = Field(default=2000, ge=1, le=65535)
-    v2x_enabled: bool = True
-    v2x_range: float = Field(default=75.0, ge=10.0, le=500.0)
-    v2x_penetration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
-    v2x_update_rate_hz: float = Field(default=2.0, gt=0, le=20.0)
-    seed: int = Field(default=42, description="Master seed: spawns, Traffic Manager, pedestrians, driver profiles, V2X penetration draw and the DSRC channel.")
-    drivers_enabled: bool = Field(default=True, description="Seeded driver profiles (cautious/normal/aggressive) for background traffic.")
-    driver_mix: "DriverMixRequest" = Field(default_factory=lambda: DriverMixRequest())
-    advisory_enabled: bool = Field(default=False, description="V2X-assisted slow-down for vehicles that received threatening BSMs.")
-    advisory_trigger_level: int = Field(default=3, ge=1, le=4)
-    tm_port: int = Field(default=8001, ge=1024, le=65535)
+def _connect_request_model():
+    """ConnectRequest = carla_host + carla_port + EVERY other WorldConfig field, optional. Generated from WorldConfig, so the
+    request, the OpenAPI document and the configuration forms can never drift apart; the values are validated once, by WorldConfig."""
+    fields = {
+        name: (Optional[info.annotation], Field(default=None, description=info.description))
+        for name, info in WorldConfig.model_fields.items() if name not in _NOT_REQUESTABLE
+    }
+    return create_model(
+        "ConnectRequest", __config__=ConfigDict(extra="forbid"),
+        carla_host=(str, Field(default="192.168.1.110")), carla_port=(int, Field(default=2000, ge=1, le=65535)), **fields)
+
+
+ConnectRequest = _connect_request_model()
 
 
 # ------------------------------------------------------------------ #
@@ -132,22 +135,13 @@ async def connect_world(req: ConnectRequest):
     Safe to call again if the world is already running — stops the old one first.
     A second request while a connect is in progress is rejected with 409.
     """
+    values = {k: v for k, v in req.model_dump(exclude_unset=True).items() if k not in ("carla_host", "carla_port")}
     try:
-        config = WorldConfig(
-            host=req.carla_host,
-            port=req.carla_port,
-            v2x_enabled=req.v2x_enabled,
-            v2x_range_m=req.v2x_range,
-            v2x_penetration_rate=req.v2x_penetration_rate,
-            v2x_update_rate_hz=req.v2x_update_rate_hz,
-            seed=req.seed,
-            drivers_enabled=req.drivers_enabled,
-            driver_mix=DriverMix(**req.driver_mix.model_dump()),
-            advisory=AdvisoryConfig(enabled=req.advisory_enabled, trigger_level=req.advisory_trigger_level),
-            tm_port=req.tm_port,
-        )
+        config = WorldConfig(host=req.carla_host, port=req.carla_port, **values)
     except (ValidationError, TypeError, ValueError) as exc:
-        detail = exc.errors(include_url=False, include_context=False) if isinstance(exc, ValidationError) else str(exc)
+        # without the offending input: a NaN/Infinity cannot be serialised back as JSON
+        detail = ([{k: v for k, v in e.items() if k != "input"} for e in exc.errors(include_url=False, include_context=False)]
+                  if isinstance(exc, ValidationError) else str(exc))
         raise HTTPException(status_code=422, detail=detail)
 
     global _connect_state, _connect_error
