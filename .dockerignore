@@ -3,6 +3,11 @@
 Dockerfile
 docker-compose.yml
 
+# recorded runs and local data never belong in the image build context
+runs/
+data/
+logs/
+
 # Git
 .git/
 .gitignore

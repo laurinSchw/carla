@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CARLA — Join Server</title>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2d3148;
+    --accent: #4f8ef7; --danger: #e05252; --success: #4caf77;
+    --warn: #f0a830; --text: #e0e4f0; --muted: #6b7280;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif;
+         font-size: 14px; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+         padding: 40px 16px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .subtitle { color: var(--muted); margin-bottom: 32px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+          padding: 28px; width: 100%; max-width: 480px; }
+  .card + .card { margin-top: 20px; }
+  .card h2 { font-size: 13px; font-weight: 600; text-transform: uppercase;
+             letter-spacing: .06em; color: var(--muted); margin-bottom: 18px; }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 5px; margin-top: 14px; }
+  label:first-of-type { margin-top: 0; }
+  input, select {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 9px 12px; font-size: 13px; width: 100%; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  button {
+    background: var(--accent); border: none; border-radius: 8px; color: #fff;
+    cursor: pointer; font-size: 14px; font-weight: 600; padding: 11px 20px; width: 100%;
+    margin-top: 20px; transition: opacity .15s;
+  }
+  button:hover { opacity: .85; }
+  button.danger { background: var(--danger); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--bg); border-radius: 8px; padding: 12px 14px; }
+  .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing:.06em; }
+  .stat .value { font-size: 20px; font-weight: 700; margin-top: 4px; }
+  #statusBar { padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-top: 16px; display: none; }
+  #statusBar.ok  { background:#1a3d2a; color:var(--success); }
+  #statusBar.err { background:#3d1a1a; color:var(--danger); }
+  #statusBar.info{ background:#1a2540; color:var(--accent); }
+  .ws-dot { display: inline-block; width:8px; height:8px; border-radius:50%;
+            background:var(--muted); margin-right:6px; vertical-align: middle; }
+  .ws-dot.live { background: var(--success); animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .checkbox-row { display:flex; align-items:center; gap:8px; margin-top:14px; }
+  .checkbox-row input[type=checkbox] { width:auto; }
+  .checkbox-row label { margin:0; font-size:13px; color:var(--text); }
+  .section-divider { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 12px; }
+  .section-title { font-size:11px; font-weight:600; text-transform:uppercase;
+                   letter-spacing:.06em; color:var(--muted); margin-bottom:8px; }
+  .lidar-badge { display:inline-flex; align-items:center; gap:4px;
+                 background:#2a1e0a; border:1px solid var(--warn); color:var(--warn);
+                 font-size:11px; font-weight:600; border-radius:4px; padding:2px 8px;
+                 margin-left:6px; }
+  .lidar-badge.active { animation: pulse 1.5s infinite; }
+  .threat-none,.threat-0,.threat-1 { color:var(--success); }
+  .threat-2 { color:var(--warn); }
+  .threat-3,.threat-4 { color:var(--danger); }
+  small { color: var(--muted); font-size: 11px; margin-top: 5px; display: block; }
+  /* LiDAR panel */
+  #lidarCard { max-width: 760px; }
+  #lidarCard .grid3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
+  #lidarCard .grid3 label { margin-top: 0; }
+  #lidarCard .btn-row { display:flex; gap:10px; }
+  #lidarCard .btn-row button { margin-top:14px; }
+  #lidarCanvas { width:100%; aspect-ratio: 4 / 3; background:#0b0e14; border-radius:8px; margin-top:14px;
+                 touch-action:none; cursor:grab; display:block; }
+  #lidarStats { font-size:12px; color:var(--muted); margin-top:8px; font-variant-numeric: tabular-nums; }
+  .lidar-badge.s-active { background:#10281a; border-color:var(--success); color:var(--success); }
+  .lidar-badge.s-error { background:#2a1010; border-color:var(--danger); color:var(--danger); }
+  .lidar-badge.s-off { background:var(--bg); border-color:var(--border); color:var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>CARLA Live Server</h1>
+<p class="subtitle">Connect your device and spawn a leading vehicle</p>
+
+<!-- Join form (shown before joining) -->
+<div class="card" id="joinCard">
+  <h2>Register Device</h2>
+
+  <label>Device Name <small>e.g. raspi-1, laptop-alice</small></label>
+  <input type="text" id="clientName" placeholder="my-device" maxlength="64">
+
+  <label>Vehicle</label>
+  <select id="blueprint"></select>
+
+  <label>Session Duration (seconds) <small>Leave blank to run until you close this page</small></label>
+  <input type="number" id="duration" placeholder="e.g. 3600 (leave empty = until disconnect)" min="10">
+
+  <div class="checkbox-row">
+    <input type="checkbox" id="enableLidar">
+    <label for="enableLidar">Enable LiDAR stream <small style="display:inline">— opens /ws/lidar/{session}</small></label>
+  </div>
+
+  <button id="joinBtn" onclick="joinServer()">Join &amp; Spawn Vehicle</button>
+</div>
+
+<!-- Telemetry card (shown after joining) -->
+<div class="card" id="telemetryCard" style="display:none">
+  <h2>
+    <span class="ws-dot" id="wsDot"></span>
+    Live Telemetry
+    <span class="lidar-badge" id="lidarBadge" style="display:none">&#x25cf; LiDAR</span>
+  </h2>
+  <div class="stat-grid">
+    <div class="stat"><div class="label">Speed</div><div class="value" id="tSpeed">—</div></div>
+    <div class="stat"><div class="label">Position X / Y</div><div class="value" id="tPos">—</div></div>
+    <div class="stat"><div class="label">Yaw</div><div class="value" id="tYaw">—</div></div>
+    <div class="stat"><div class="label">Time Left</div><div class="value" id="tRemain">—</div></div>
+  </div>
+
+  <!-- V2X section — shown when server has V2X data -->
+  <div class="section-divider" id="v2xSection" style="display:none">
+    <div class="section-title">V2X Network</div>
+    <div class="stat-grid">
+      <div class="stat"><div class="label">Neighbors</div><div class="value" id="v2xNeighbors">—</div></div>
+      <div class="stat"><div class="label">Nearest (m)</div><div class="value" id="v2xNearest">—</div></div>
+      <div class="stat"><div class="label">Top Threat</div><div class="value" id="v2xThreat">—</div></div>
+      <div class="stat"><div class="label">BSM Speed</div><div class="value" id="v2xSpeed">—</div></div>
+    </div>
+    <!-- SPAT row -->
+    <div style="margin-top:10px">
+      <div class="section-title" style="margin-bottom:5px">Nearby Intersections (SPAT)</div>
+      <div id="v2xSpat" style="font-size:12px; color:var(--muted)">—</div>
+    </div>
+    <!-- VRU row -->
+    <div style="margin-top:10px">
+      <div class="section-title" style="margin-bottom:5px">Nearby VRUs</div>
+      <div id="v2xVru" style="font-size:12px; color:var(--muted)">—</div>
+    </div>
+  </div>
+
+  <div id="statusBar"></div>
+  <button class="danger" onclick="leaveServer()" style="margin-top:18px">Leave &amp; Despawn Vehicle</button>
+</div>
+
+<!-- LiDAR card (shown after joining) -->
+<div class="card" id="lidarCard" style="display:none">
+  <h2>LiDAR <span class="lidar-badge s-off" id="lidarState">off</span></h2>
+  <div class="grid3">
+    <div><label>Channels</label>
+      <select id="lidChannels"><option>16</option><option selected>32</option><option>64</option><option>128</option></select></div>
+    <div><label>Points / second</label>
+      <select id="lidPps"><option value="100000">100 k</option><option value="250000">250 k</option>
+        <option value="500000" selected>500 k</option><option value="1000000">1 M</option><option value="2000000">2 M</option></select></div>
+    <div><label>Range (m)</label>
+      <select id="lidRange"><option>50</option><option selected>100</option><option>150</option><option>200</option></select></div>
+    <div><label>Stream points</label>
+      <select id="lidMaxPoints"><option value="10000">10 k</option><option value="25000" selected>25 k</option>
+        <option value="50000">50 k</option><option value="0">all</option></select></div>
+    <div><label>Stream rate</label>
+      <select id="lidMaxHz"><option value="0" selected>every frame</option><option value="10">10 Hz</option><option value="5">5 Hz</option></select></div>
+    <div><label>Compression</label>
+      <select id="lidCompress"><option value="0" selected>off</option><option value="1">zlib</option></select></div>
+  </div>
+  <div class="btn-row">
+    <button onclick="lidarApply()" id="lidApplyBtn">Start / apply</button>
+    <button class="danger" onclick="lidarStop()">Stop</button>
+  </div>
+  <div class="grid3" style="margin-top:14px">
+    <div><label>View</label>
+      <select id="lidView" onchange="lidarViewChanged()"><option value="top">Top-down</option><option value="3d">3-D (drag to rotate)</option></select></div>
+    <div><label>Colour by</label>
+      <select id="lidColor" onchange="lidarViewChanged()"><option value="tag">Semantic class</option><option value="height">Height</option>
+        <option value="distance">Distance</option><option value="intensity">Intensity</option></select></div>
+    <div><label>Own vehicle</label>
+      <select id="lidOwn" onchange="lidarViewChanged()"><option value="hide" selected>hide own hits</option><option value="show">show</option></select></div>
+  </div>
+  <canvas id="lidarCanvas" width="960" height="720"></canvas>
+  <div id="lidarStats">no data</div>
+  <small>Scroll to zoom. Points are in the sensor frame: the vehicle is at the centre, up = driving direction.</small>
+  <div id="lidarMsg" style="font-size:12px; margin-top:6px; color:var(--warn)"></div>
+</div>
+
+<script src="/static/js/lidar-decoder.js"></script>
+<script src="/static/js/lidar-view.js"></script>
+<script>
+const HOST = window.location.origin;
+let _sessionId = null;
+let _ws = null;
+let _lidarWs = null;
+
+// ---------- load blueprints ----------
+async function loadBlueprints() {
+  try {
+    const r = await fetch(`${HOST}/client/blueprints`);
+    const d = await r.json();
+    const sel = document.getElementById('blueprint');
+    d.blueprints.forEach(bp => {
+      const opt = document.createElement('option');
+      opt.value = bp;
+      opt.textContent = bp.split('.').slice(1).join(' · '); // prettier display
+      if (bp === d.default) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch { /* server not live yet, silently ignore */ }
+}
+
+// ---------- join ----------
+async function joinServer() {
+  const name = document.getElementById('clientName').value.trim();
+  if (!name) { showStatus('Please enter a device name', 'err'); return; }
+
+  const blueprint = document.getElementById('blueprint').value;
+  const durationVal = document.getElementById('duration').value;
+  const duration = durationVal ? parseFloat(durationVal) : null;
+  const enableLidar = document.getElementById('enableLidar').checked;
+
+  document.getElementById('joinBtn').disabled = true;
+  showStatus('Joining…', 'info');
+
+  try {
+    const r = await fetch(`${HOST}/client/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_name: name, vehicle_blueprint: blueprint, duration_seconds: duration, enable_lidar: enableLidar }),
+    });
+    const d = await r.json();
+    if (!r.ok) { showStatus(d.detail || 'Join failed', 'err'); document.getElementById('joinBtn').disabled = false; return; }
+
+    _sessionId = d.session_id;
+    document.getElementById('joinCard').style.display = 'none';
+    document.getElementById('telemetryCard').style.display = 'block';
+    showStatus(d.message, 'ok');
+    openWS(d.ws_url);
+    lidarInit();
+    if (d.lidar_ws_url) openLidarWS(d.lidar_ws_url);
+    else if (d.lidar_error) lidarMessage(d.lidar_error.message || 'LiDAR refused');
+  } catch (e) {
+    showStatus('Network error: ' + e.message, 'err');
+    document.getElementById('joinBtn').disabled = false;
+  }
+}
+
+// ---------- telemetry WS ----------
+function openWS(path) {
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${wsProto}://${location.host}${path}`;
+  _ws = new WebSocket(url);
+
+  _ws.onopen = () => {
+    setDot(true);
+    _ws._ping = setInterval(() => _ws.readyState === WebSocket.OPEN && _ws.send('ping'), 10000);
+  };
+
+  _ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'telemetry') {
+      const d = msg.data;
+      document.getElementById('tSpeed').textContent   = `${d.speed_kmh} km/h`;
+      document.getElementById('tPos').textContent     = `${d.x} / ${d.y}`;
+      document.getElementById('tYaw').textContent     = `${d.yaw}°`;
+      const rem = msg.remaining_seconds;
+      document.getElementById('tRemain').textContent  = rem != null ? `${Math.ceil(rem)}s` : '∞';
+      if (d.v2x) updateV2X(d.v2x);
+    } else if (msg.type === 'session_expired') {
+      showStatus('Your session has expired. Vehicle despawned.', 'err');
+      closeAllWS();
+      document.getElementById('joinCard').style.display = 'block';
+      document.getElementById('telemetryCard').style.display = 'none';
+      document.getElementById('lidarCard').style.display = 'none';
+    } else if (msg.type === 'pong') {
+      // heartbeat confirmed
+    }
+  };
+
+  _ws.onerror = () => setDot(false);
+  _ws.onclose = () => { setDot(false); clearInterval(_ws._ping); };
+}
+
+// ---------- V2X display ----------
+function updateV2X(v2x) {
+  const sec = document.getElementById('v2xSection');
+  sec.style.display = 'block';
+  document.getElementById('v2xNeighbors').textContent = v2x.neighbors.length;
+  const nearest = v2x.neighbors.length
+    ? Math.min(...v2x.neighbors.map(n => n.distance)).toFixed(0) + ' m'
+    : '—';
+  document.getElementById('v2xNearest').textContent = nearest;
+  const topThreat = v2x.threats.length
+    ? Math.max(...v2x.threats.map(t => t.threat_level))
+    : 0;
+  const threatEl = document.getElementById('v2xThreat');
+  const labels = ['None', 'Low', 'Med', 'High', 'Crit'];
+  threatEl.textContent = labels[topThreat] || topThreat;
+  threatEl.className = `value threat-${topThreat}`;
+  document.getElementById('v2xSpeed').textContent = v2x.bsm
+    ? `${(v2x.bsm.speed * 3.6).toFixed(1)} km/h` : '—';
+
+  // SPAT
+  const spatEl = document.getElementById('v2xSpat');
+  if (v2x.spat_nearby && v2x.spat_nearby.length) {
+    const _phaseColor = e => ({'protectedMovementAllowed':'#4caf77','stop-And-Remain':'#e05252','protectedClearance':'#f0a830'}[e] || '#6b7280');
+    spatEl.innerHTML = v2x.spat_nearby.map(s => {
+      const states = s.states.map(m =>
+        `<span style="color:${_phaseColor(m.movement_event)}">${m.movement_event.replace('protected','').replace('Movement','')}</span>`
+      ).join(', ');
+      return `Intersection ${s.intersection_id} (${s.distance}m): ${states || '—'}`;
+    }).join('<br>');
+  } else {
+    spatEl.textContent = 'No intersections in range';
+  }
+
+  // VRU
+  const vruEl = document.getElementById('v2xVru');
+  if (v2x.vru_nearby && v2x.vru_nearby.length) {
+    vruEl.textContent = v2x.vru_nearby
+      .map(v => `${v.profile} #${v.station_id} — ${v.distance}m (${v.motion_state})`)
+      .join(', ');
+  } else {
+    vruEl.textContent = 'No VRUs in range';
+  }
+}
+
+// ---------- LiDAR ----------
+let _lidarView = null, _lidarStats = { frames: 0, bytes: 0, since: performance.now(), fps: 0, lastFrame: null, points: 0 };
+let _decoding = false, _lidarStateName = 'off';
+
+const LID_BADGE = { active: 's-active', error: 's-error', off: 's-off', destroyed: 's-off' };
+function lidarSetState(state) {
+  _lidarStateName = state;
+  const el = document.getElementById('lidarState');
+  el.textContent = state.replace('_', ' ');
+  el.className = 'lidar-badge ' + (LID_BADGE[state] || '');
+}
+function lidarMessage(text) { document.getElementById('lidarMsg').textContent = text || ''; }
+
+async function lidarInit() {
+  document.getElementById('lidarCard').style.display = 'block';
+  if (!_lidarView) {
+    _lidarView = new LidarView(document.getElementById('lidarCanvas'));
+    _lidarView.render();
+    try { _lidarView.setTagTable((await (await fetch(`${HOST}/client/lidar/schema`)).json()).semantic_tags); } catch { /* fallback colours */ }
+  }
+  try {
+    const r = await (await fetch(`${HOST}/client/lidar/${_sessionId}`)).json();
+    lidarSetState(r.sensor ? r.sensor.state : 'off');
+  } catch { lidarSetState('off'); }
+}
+
+function lidarViewChanged() {
+  if (!_lidarView) return;
+  _lidarView.mode = document.getElementById('lidView').value;
+  _lidarView.color = document.getElementById('lidColor').value;
+  _lidarView.hideOwn = document.getElementById('lidOwn').value === 'hide';
+  _lidarView.render();
+}
+
+function lidarConfigFromForm() {
+  return {
+    channels: parseInt(document.getElementById('lidChannels').value, 10),
+    points_per_second: parseInt(document.getElementById('lidPps').value, 10),
+    range_m: parseFloat(document.getElementById('lidRange').value),
+  };
+}
+
+async function lidarApply() {
+  lidarMessage('');
+  const btn = document.getElementById('lidApplyBtn');
+  btn.disabled = true;
+  try {
+    const r = await fetch(`${HOST}/client/lidar/${_sessionId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lidarConfigFromForm()),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      if (d.error === 'lidar_budget_exceeded') {
+        lidarMessage(`LiDAR budget exceeded: asked ${d.requested_pps} points/s, ${d.available_pps} available.`);
+      } else {
+        lidarMessage(d.message || (typeof d.detail === 'string' ? d.detail : 'LiDAR request refused'));
+      }
+      return;
+    }
+    lidarSetState(d.sensor.state);
+    openLidarWS(d.lidar_ws_url);   // (re)open with the current stream settings
+  } catch (e) { lidarMessage('Network error: ' + e.message); }
+  finally { btn.disabled = false; }
+}
+
+async function lidarStop() {
+  lidarMessage('');
+  closeLidarWS();
+  try { await fetch(`${HOST}/client/lidar/${_sessionId}`, { method: 'DELETE' }); } catch { /* ignore */ }
+  lidarSetState('off');
+  if (_lidarView) { _lidarView.frame = null; _lidarView.render(); }
+  document.getElementById('lidarStats').textContent = 'stopped';
+}
+
+function closeLidarWS() {
+  if (!_lidarWs) return;
+  clearInterval(_lidarWs._ping);               // the old socket's keep-alive timer must not outlive it
+  _lidarWs.onclose = null;
+  _lidarWs.close();
+  _lidarWs = null;
+}
+
+function openLidarWS(path) {
+  closeLidarWS();
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const maxPoints = parseInt(document.getElementById('lidMaxPoints').value, 10);
+  const maxHz = parseInt(document.getElementById('lidMaxHz').value, 10);
+  const q = new URLSearchParams();
+  if (maxPoints > 0) q.set('max_points', maxPoints);
+  if (maxHz > 0) q.set('max_hz', maxHz);
+  if (document.getElementById('lidCompress').value === '1') q.set('compress', 'true');
+  const qs = q.toString();
+  _lidarWs = new WebSocket(`${wsProto}://${location.host}${path}${qs ? '?' + qs : ''}`);
+  _lidarWs.binaryType = 'arraybuffer';
+  _lidarStats = { frames: 0, bytes: 0, since: performance.now(), fps: 0, lastFrame: null, points: 0 };
+
+  _lidarWs.onopen = () => {
+    document.getElementById('lidarBadge').style.display = 'inline-flex';
+    _lidarWs._ping = setInterval(() => _lidarWs && _lidarWs.readyState === WebSocket.OPEN && _lidarWs.send('ping'), 10000);
+  };
+
+  // binary = a protocol-v3 point-cloud frame, text = state / control message
+  _lidarWs.onmessage = async (ev) => {
+    if (typeof ev.data === 'string') {
+      const m = JSON.parse(ev.data);
+      if (m.type === 'state') { lidarSetState(m.state); if (m.error) lidarMessage(m.error); }
+      else if (m.type === 'error') lidarMessage(m.message);
+      return;
+    }
+    if (_decoding) return;            // still busy with the previous frame: show the newest one next
+    _decoding = true;
+    try {
+      const frame = await LidarDecoder.decode(ev.data);
+      const st = _lidarStats;
+      st.frames++; st.bytes += ev.data.byteLength; st.points = frame.header.numPoints;
+      const dropped = st.lastFrame != null ? Math.max(0, (frame.header.frame - st.lastFrame) - 1) : 0;
+      st.lastFrame = frame.header.frame;
+      const now = performance.now();
+      if (now - st.since >= 1000) { st.fps = st.frames * 1000 / (now - st.since); st.frames = 0; st.since = now; }
+      _lidarView.setFrame(frame);
+      document.getElementById('lidarStats').textContent =
+        `frame ${frame.header.frame} · ${frame.header.numPoints} points (${_lidarView.lastDrawn ?? 0} drawn) · ` +
+        `${(ev.data.byteLength / 1024).toFixed(0)} kB/frame · ${st.fps.toFixed(1)} fps` + (dropped ? ` · ${dropped} sim frames between updates` : '');
+    } catch (e) { lidarMessage('Bad LiDAR frame: ' + e.message); }
+    finally { _decoding = false; }
+  };
+
+  _lidarWs.onclose = () => {
+    document.getElementById('lidarBadge').classList.remove('active');
+    clearInterval(_lidarWs && _lidarWs._ping);
+    if (_lidarStateName !== 'off') lidarSetState('off');
+  };
+}
+
+function closeAllWS() {
+  if (_ws) { _ws.close(); _ws = null; }
+  closeLidarWS();
+  setDot(false);
+}
+
+// ---------- leave ----------
+async function leaveServer() {
+  if (!_sessionId) return;
+  closeAllWS();
+  try {
+    await fetch(`${HOST}/client/leave/${_sessionId}`, { method: 'DELETE' });
+  } catch { /* ignore */ }
+  _sessionId = null;
+  document.getElementById('joinCard').style.display = 'block';
+  document.getElementById('joinBtn').disabled = false;
+  document.getElementById('telemetryCard').style.display = 'none';
+  document.getElementById('lidarCard').style.display = 'none';
+  document.getElementById('v2xSection').style.display = 'none';
+  lidarSetState('off');
+  if (_lidarView) { _lidarView.frame = null; }
+  showStatus('Left the server. Vehicle despawned.', 'info');
+}
+
+// ---------- helpers ----------
+function setDot(live) {
+  const dot = document.getElementById('wsDot');
+  dot.className = 'ws-dot' + (live ? ' live' : '');
+}
+
+function showStatus(msg, type) {
+  const el = document.getElementById('statusBar');
+  el.textContent = msg;
+  el.className = type;
+  el.style.display = 'block';
+}
+
+// Despawn on page close
+window.addEventListener('beforeunload', () => {
+  if (_sessionId) {
+    navigator.sendBeacon(`${HOST}/client/leave/${_sessionId}`, '');
+  }
+});
+
+// ---------- init ----------
+loadBlueprints();
+</script>
+</body>
+</html>

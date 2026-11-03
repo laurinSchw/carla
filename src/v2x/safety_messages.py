@@ -1,0 +1,570 @@
+"""
+V2V Message Standards - BSM (Basic Safety Message) Implementation
+
+This implementation is based on the SAE J2735 and ETSI ITS-G5 published standards
+for Vehicle-to-Vehicle (V2V) communication.
+
+Standards Reference:
+- SAE J2735 - Dedicated Short Range Communications (DSRC) Message Set Dictionary
+  https://www.sae.org/standards/content/j2735_202007/
+- ETSI EN 302 637-2 - Intelligent Transport Systems (ITS); Vehicular Communications;
+  Cooperative Awareness Messages (CAM)
+
+Note: SAE J2735 and ETSI ITS-G5 are published industry standards. This is an
+original implementation based on the public specification, not derived from
+any copyrighted source code.
+
+CARLA Integration:
+- Vehicle data extraction uses CARLA Simulator Python API
+  CARLA Simulator (MIT License) - https://carla.org/
+"""
+
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict
+from enum import IntEnum
+import time
+import math
+
+
+class VehicleType(IntEnum):
+    """Vehicle classification"""
+    PASSENGER_CAR = 0
+    BUS = 1
+    TRUCK = 2
+    MOTORCYCLE = 3
+    EMERGENCY = 4
+    UNKNOWN = 99
+
+
+# ── Vehicle-type detection from CARLA blueprint ID ────────────────────────────
+# Maps substrings of vehicle.type_id to VehicleType.
+# Checked in order; first match wins.  "passenger_car" catch-all is not listed
+# here — any 4-wheeled blueprint that misses all patterns falls back to
+# PASSENGER_CAR in _vehicle_type_from_actor().
+_BLUEPRINT_TYPE_MAP: list = [
+    # Emergency
+    ("ambulance",           VehicleType.EMERGENCY),
+    ("firetruck",           VehicleType.EMERGENCY),
+    ("police",              VehicleType.EMERGENCY),
+    # Buses / large passenger vans
+    ("fusorosa",            VehicleType.BUS),      # Mitsubishi Fuso Rosa (full bus)
+    ("carlacola",           VehicleType.BUS),      # CarlaMotors generic bus
+    (".t2",                 VehicleType.BUS),      # VW Transporter T2 / T2_2021 (minibus)
+    # Trucks / utility
+    ("cybertruck",          VehicleType.TRUCK),    # Tesla Cybertruck
+    ("sprinter",            VehicleType.TRUCK),    # Mercedes Sprinter
+    # Motorcycles / bicycles / micro-vehicles
+    ("harley",              VehicleType.MOTORCYCLE),
+    ("kawasaki",            VehicleType.MOTORCYCLE),
+    ("vespa",               VehicleType.MOTORCYCLE),
+    ("yamaha",              VehicleType.MOTORCYCLE),
+    ("ninja",               VehicleType.MOTORCYCLE),
+    ("crossbike",           VehicleType.MOTORCYCLE),
+    ("century",             VehicleType.MOTORCYCLE),  # diamondback.century
+    ("omafiets",            VehicleType.MOTORCYCLE),  # gazelle.omafiets bicycle
+    ("low_rider",           VehicleType.MOTORCYCLE),
+]
+
+
+def _vehicle_type_from_actor(vehicle) -> 'VehicleType':
+    """
+    Derive VehicleType from the CARLA actor's blueprint ID.
+
+    Uses vehicle.type_id (e.g. 'vehicle.ford.ambulance') to classify the
+    vehicle.  Falls back to actor.attributes['number_of_wheels'] (a cached
+    blueprint dict — no RPC call) so that any two-wheeled blueprint not yet
+    in _BLUEPRINT_TYPE_MAP is still classified as MOTORCYCLE rather than
+    PASSENGER_CAR.
+
+    Args:
+        vehicle: CARLA vehicle actor with .type_id attribute.
+
+    Returns:
+        VehicleType enum value.
+    """
+    type_id = getattr(vehicle, 'type_id', '').lower()
+
+    for fragment, vtype in _BLUEPRINT_TYPE_MAP:
+        if fragment in type_id:
+            return vtype
+
+    # Wheel-count fallback: two-wheeled vehicles not caught by name lookup.
+    # Uses actor.attributes (a cached blueprint dict — no RPC call) rather than
+    # get_physics_control() which is a blocking server round-trip.
+    try:
+        num_wheels = int(getattr(vehicle, 'attributes', {}).get('number_of_wheels', '4'))
+        if num_wheels <= 2:
+            return VehicleType.MOTORCYCLE
+    except (ValueError, TypeError):
+        pass
+
+    return VehicleType.PASSENGER_CAR
+
+
+class BrakingStatus(IntEnum):
+    """Braking system status"""
+    UNAVAILABLE = 0
+    OFF = 1
+    ON = 2
+    ENGAGED = 3
+
+
+@dataclass
+class BSMCore:
+    """
+    Basic Safety Message (BSM) - Core Data
+    Based on SAE J2735 standard for V2V communication.
+    
+    This is the essential data transmitted at high frequency (2-10 Hz)
+    for cooperative awareness and collision avoidance.
+    """
+    # Temporal information
+    timestamp: float  # Simulation time (seconds)
+    msg_count: int  # Message counter (0-127, wraps around)
+    
+    # Vehicle identification
+    vehicle_id: int  # Unique vehicle identifier
+    vehicle_type: VehicleType = VehicleType.PASSENGER_CAR
+    
+    # Position (WGS84 or local coordinate system)
+    x_m: float = 0.0  # CARLA world X, metres (was "latitude"; handoff S8)
+    y_m: float = 0.0  # CARLA world Y, metres (was "longitude")
+    z_m: float = 0.0  # CARLA world Z, metres (was "elevation")
+    
+    # Position accuracy (meters)
+    position_accuracy: float = 1.0
+    
+    # Motion state
+    speed: float = 0.0  # m/s
+    # World-frame velocity components (m/s). When both are set the threat model uses them, so
+    # reversing or sliding vehicles are handled; when None it falls back to speed + heading (S14).
+    velocity_x: Optional[float] = None
+    velocity_y: Optional[float] = None
+    heading: float = 0.0  # degrees (0-359.9)
+    steering_angle: float = 0.0  # degrees
+    
+    # Acceleration (m/s²)
+    longitudinal_accel: float = 0.0
+    lateral_accel: float = 0.0
+    vertical_accel: float = 0.0
+    yaw_rate: float = 0.0  # degrees/second
+    
+    # Vehicle size (meters)
+    vehicle_length: float = 4.5
+    vehicle_width: float = 1.8
+    vehicle_height: float = 1.5
+    
+    # Brake status
+    brake_status: BrakingStatus = BrakingStatus.UNAVAILABLE
+    brake_pressure: float = 0.0  # 0-100%
+    
+    # Transmission state
+    transmission_state: str = "neutral"  # park, reverse, neutral, forward
+    
+    # Control confidence
+    throttle_confidence: float = 100.0  # 0-100%
+    brake_confidence: float = 100.0  # 0-100%
+    steering_confidence: float = 100.0  # 0-100%
+
+
+@dataclass
+class BSMPartII:
+    """
+    BSM Part II - Optional Extended Data
+    Transmitted less frequently or on-demand for specific scenarios.
+    """
+    # Path history (breadcrumb trail)
+    path_history: List[tuple] = field(default_factory=list)  # [(x, y, time), ...]
+    path_prediction: List[tuple] = field(default_factory=list)  # Predicted path
+    
+    # Special vehicle status
+    is_emergency_vehicle: bool = False
+    siren_active: bool = False
+    lights_active: bool = False
+    
+    # Weather/road info from sensors
+    exterior_lights: str = "off"  # off, low_beam, high_beam, fog
+    wiper_status: str = "off"  # off, intermittent, low, high
+    
+    # V2V specific
+    cooperative_status: str = "available"  # available, busy, unavailable
+
+
+@dataclass
+class CooperativeAwarenessMessage:
+    """
+    CAM (Cooperative Awareness Message) - European standard
+    Similar to BSM but with different structure (ETSI ITS-G5)
+    """
+    station_id: int  # Unique ITS station ID
+    generation_time: float  # Timestamp
+    
+    # Reference position
+    reference_position: tuple  # (lat, lon, alt) or (x, y, z)
+    
+    # High frequency container
+    heading: float
+    speed: float
+    drive_direction: str  # forward, backward
+    
+    # Vehicle role
+    vehicle_role: str  # default, public_transport, emergency, road_work
+    
+    # Low frequency container (optional, sent every 500ms)
+    vehicle_length: float = 4.5
+    vehicle_width: float = 1.8
+    
+    # Path history
+    path_history: List[tuple] = field(default_factory=list)
+
+
+@dataclass
+class V2VEnhancedMessage:
+    """
+    Enhanced V2V message combining BSM with sensor data sharing
+    For cooperative perception and sensor fusion scenarios.
+    """
+    # Core BSM data
+    bsm: BSMCore
+    
+    # Part II (optional extended data)
+    bsm_part2: Optional[BSMPartII] = None
+    
+    # Sensor data sharing (cooperative perception)
+    detected_objects: List[Dict] = field(default_factory=list)  # Objects detected by sensors
+    lidar_points_summary: Optional[Dict] = None  # Downsampled LiDAR data
+    camera_detections: List[Dict] = field(default_factory=list)  # Vision-based detections
+    
+    # Communication metadata
+    transmission_time: float = 0.0  # When message was sent
+    reception_time: float = 0.0  # When message was received
+    link_quality: float = 100.0  # Signal strength (0-100%)
+    hop_count: int = 0  # For multi-hop scenarios
+    
+    # Message priority
+    priority: int = 0  # 0=normal, 1=high, 2=emergency
+
+
+def _world_velocity(bsm: BSMCore) -> tuple:
+    """(vx, vy) from the BSM's velocity vector, else from speed along the heading."""
+    if bsm.velocity_x is not None and bsm.velocity_y is not None:
+        return bsm.velocity_x, bsm.velocity_y
+    return (bsm.speed * math.cos(math.radians(bsm.heading)),
+            bsm.speed * math.sin(math.radians(bsm.heading)))
+
+
+def _bounding_radius(bsm: BSMCore) -> float:
+    """Radius of the circle around the vehicle's footprint (half-diagonal of length x width)."""
+    return math.hypot(bsm.vehicle_length / 2.0, bsm.vehicle_width / 2.0)
+
+
+def calculate_threat_level(ego_bsm: BSMCore, other_bsm: BSMCore) -> tuple:
+    """
+    Calculate collision threat level between two vehicles.
+
+    Time to collision is the closing speed along the line of sight divided by the GAP between
+    the two vehicles' bounding circles (centre distance minus both radii, never below 0), using
+    the BSM velocity vectors (S14). Bounding circles are conservative: they give a shorter TTC
+    than the true footprints for side-by-side geometry.
+
+    The thresholds below are project-defined, not taken from a standard or a cited study:
+    centre distance > 100 m or no closure -> 0; TTC > 10 s -> 1; > 5 s -> 2; > 2 s -> 3; else 4.
+
+    Args:
+        ego_bsm: Ego vehicle BSM
+        other_bsm: Other vehicle BSM
+
+    Returns:
+        (threat_level, time_to_collision, distance) with ``distance`` the centre-to-centre distance.
+        threat_level: 0=no threat, 1=low, 2=medium, 3=high, 4=imminent
+    """
+    dx = other_bsm.x_m - ego_bsm.x_m
+    dy = other_bsm.y_m - ego_bsm.y_m
+    distance = math.sqrt(dx**2 + dy**2)
+
+    ego_vx, ego_vy = _world_velocity(ego_bsm)
+    other_vx, other_vy = _world_velocity(other_bsm)
+    rel_vx = other_vx - ego_vx
+    rel_vy = other_vy - ego_vy
+
+    if distance > 1e-6:
+        # Radial closing speed along the line of sight, not the relative speed magnitude.
+        ux = dx / distance
+        uy = dy / distance
+        closing_speed = -(rel_vx * ux + rel_vy * uy)
+    else:
+        closing_speed = float('inf')
+
+    if closing_speed > 0.1:  # Positive means vehicles are converging
+        gap = max(distance - _bounding_radius(ego_bsm) - _bounding_radius(other_bsm), 0.0)
+        ttc = gap / closing_speed
+    else:
+        ttc = float('inf')
+
+    if distance > 100 or closing_speed <= 0.1:
+        threat = 0  # No threat
+    elif ttc > 10:
+        threat = 1  # Low threat
+    elif ttc > 5:
+        threat = 2  # Medium threat
+    elif ttc > 2:
+        threat = 3  # High threat
+    else:
+        threat = 4  # Imminent collision
+
+    return (threat, ttc, distance)
+
+
+def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int, 
+                          snapshot=None, prev_velocity=None, delta_time=0.05,
+                          max_steer_angle: Optional[float] = None,
+                          extent: Optional[tuple] = None) -> Optional[BSMCore]:
+    """
+    Create BSM message from CARLA vehicle actor.
+    
+    CRITICAL: Uses snapshot data for scientifically accurate measurements.
+    vehicle.get_velocity() returns CACHED data from previous tick, which is 
+    incorrect for synchronous simulation. Always use snapshot.find().get_velocity().
+    
+    Args:
+        vehicle: CARLA vehicle actor
+        vehicle_id: Unique vehicle identifier
+        msg_count: Message counter
+        snapshot: WorldSnapshot for fresh data (REQUIRED for accuracy)
+        prev_velocity: Previous velocity for accel calculation
+        delta_time: Time since last update
+        max_steer_angle: Cached max wheel steer angle in degrees (physics constant). When
+            None it is read from the actor (a blocking RPC per call).
+        extent: Cached bounding-box half extents (x, y, z) in metres. ``vehicle.bounding_box`` is a blocking
+            RPC (~1.1 ms measured on a LAN CARLA server) and a vehicle's size never changes, so callers that
+            create BSMs every update should cache it; None reads it from the actor.
+    
+    Returns:
+        BSMCore instance, or None when a snapshot was given but the actor is not in it
+        (destroyed this tick). Never mixes sim-time and wall-clock stamps (handoff S10).
+    """
+    snapshot_accel = None  # world-frame acceleration of the actor in this tick, if available
+
+    # Get FRESH velocity from snapshot (not cached from previous tick)
+    if snapshot:
+        actor_snapshot = snapshot.find(vehicle.id)
+        if not actor_snapshot:
+            return None  # destroyed this tick: skip the station rather than mix clocks (S10)
+        transform = actor_snapshot.get_transform()
+        velocity = actor_snapshot.get_velocity()
+        angular_velocity = actor_snapshot.get_angular_velocity()
+        if hasattr(actor_snapshot, 'get_acceleration'):
+            snapshot_accel = actor_snapshot.get_acceleration()
+        if hasattr(snapshot, 'timestamp') and hasattr(snapshot.timestamp, 'elapsed_seconds'):
+            sim_timestamp = float(snapshot.timestamp.elapsed_seconds)
+        else:
+            sim_timestamp = time.time()
+    else:
+        # Fallback to cached data (SCIENTIFICALLY INACCURATE): wall-clock stamp
+        transform = vehicle.get_transform()
+        sim_timestamp = time.time()
+        velocity = vehicle.get_velocity()
+        angular_velocity = vehicle.get_angular_velocity()
+    
+    # Calculate speed
+    speed_ms = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+    
+    # Longitudinal acceleration: world acceleration projected on the heading (S9);
+    # falls back to the change of speed magnitude when the snapshot has no acceleration.
+    yaw_rad = math.radians(transform.rotation.yaw)
+    if snapshot_accel is not None:
+        long_accel = snapshot_accel.x * math.cos(yaw_rad) + snapshot_accel.y * math.sin(yaw_rad)
+    elif prev_velocity is not None:
+        long_accel = (speed_ms - prev_velocity) / delta_time if delta_time > 0 else 0.0
+    else:
+        long_accel = 0.0
+    
+    # Get vehicle control
+    control = vehicle.get_control()
+    
+    # Calculate vehicle-specific steering angle
+    try:
+        if max_steer_angle is None:
+            max_steer_angle = vehicle.get_physics_control().wheels[0].max_steer_angle
+        steering_angle = control.steer * max_steer_angle
+    except Exception:
+        # Fallback to generic approximation if physics control unavailable
+        steering_angle = control.steer * 70.0
+    
+    if extent is None:
+        bb = vehicle.bounding_box
+        extent = (bb.extent.x, bb.extent.y, bb.extent.z)
+
+    # Lateral acceleration: world acceleration projected on the right vector (S9; positive = right,
+    # CARLA is left-handed with y to the right); otherwise a steering-angle bicycle estimate.
+    if snapshot_accel is not None:
+        lateral_accel = -snapshot_accel.x * math.sin(yaw_rad) + snapshot_accel.y * math.cos(yaw_rad)
+    elif abs(control.steer) > 0.01 and speed_ms > 0.1:
+        # Use wheelbase from vehicle dimensions
+        wheelbase = extent[0] * 2 * 0.6  # Approximate 60% of length
+        try:
+            turn_radius = wheelbase / abs(math.tan(math.radians(steering_angle)))
+            lateral_accel = (speed_ms ** 2) / turn_radius * math.copysign(1, control.steer)
+        except (ZeroDivisionError, ValueError):
+            lateral_accel = 0.0
+    else:
+        lateral_accel = 0.0
+    
+    # CARLA's get_angular_velocity() is already in deg/s (no conversion; handoff S2)
+    yaw_rate = angular_velocity.z
+    
+    # Determine brake status
+    if control.brake > 0.5:
+        brake_status = BrakingStatus.ENGAGED
+    elif control.brake > 0.1:
+        brake_status = BrakingStatus.ON
+    else:
+        brake_status = BrakingStatus.OFF
+    
+    # Determine transmission state
+    if control.reverse:
+        trans_state = "reverse"
+    elif control.throttle > 0:
+        trans_state = "forward"
+    else:
+        trans_state = "neutral"
+    
+    # Get bounding box for vehicle dimensions
+    vehicle_length = extent[0] * 2
+    vehicle_width = extent[1] * 2
+    vehicle_height = extent[2] * 2
+    
+    return BSMCore(
+        timestamp=sim_timestamp,
+        msg_count=msg_count % 128,
+        vehicle_id=vehicle_id,
+        vehicle_type=_vehicle_type_from_actor(vehicle),
+        x_m=transform.location.x,
+        y_m=transform.location.y,
+        z_m=transform.location.z,
+        position_accuracy=0.5,  # Assuming high accuracy in simulation
+        speed=speed_ms,
+        velocity_x=velocity.x,
+        velocity_y=velocity.y,
+        heading=transform.rotation.yaw % 360,
+        steering_angle=steering_angle,
+        longitudinal_accel=long_accel,
+        lateral_accel=lateral_accel,
+        vertical_accel=0.0,  # Road vehicles typically don't need vertical accel
+        yaw_rate=yaw_rate,
+        vehicle_length=vehicle_length,
+        vehicle_width=vehicle_width,
+        vehicle_height=vehicle_height,
+        brake_status=brake_status,
+        brake_pressure=control.brake * 100,
+        transmission_state=trans_state,
+        throttle_confidence=100.0,
+        brake_confidence=100.0,
+        steering_confidence=100.0
+    )
+
+
+class DENMCauseCode(IntEnum):
+    """
+    DENM cause codes after ETSI EN 302 637-3. The numeric values used here match the cause-code
+    list as far as the author knows, but the table number and the full list are UNVERIFIED
+    (handoff S15) — check against the standard before relying on them.
+    Describes the type of environmental notification event.
+    """
+    RESERVED = 0
+    TRAFFIC_CONDITION = 1
+    ACCIDENT = 2
+    ROAD_WORKS = 3
+    ADVERSE_WEATHER_ADHESION = 6
+    HAZARDOUS_SURFACE = 9
+    OBSTACLE_ON_ROAD = 10
+    ANIMAL_ON_ROAD = 11
+    HUMAN_PRESENCE_ON_ROAD = 14
+    WRONG_WAY_DRIVING = 17
+    RESCUE_RECOVERY_IN_PROGRESS = 18
+    SLOW_VEHICLE = 26
+    VEHICLE_BREAKDOWN = 91
+    POST_CRASH = 92
+    HUMAN_PROBLEM = 93
+    STATIONARY_VEHICLE = 94
+    EMERGENCY_VEHICLE_APPROACHING = 95
+    DANGEROUS_CURVE = 96
+    COLLISION_RISK = 97
+    SIGNAL_VIOLATION = 98
+    DANGEROUS_END_OF_QUEUE = 99
+
+
+@dataclass
+class DENM:
+    """
+    Decentralized Environmental Notification Message (DENM)
+    Based on ETSI EN 302 637-3 — ITS Vehicular Communications.
+
+    Used to alert nearby vehicles of hazardous or relevant road events.
+    """
+    # Management container
+    station_id: int          # Originating ITS station ID (maps to vehicle_id)
+    action_id: int           # Sequence number at originating station
+    detection_time: float    # Simulation time when event was detected (seconds)
+    reference_time: float    # Time of last update (seconds)
+    event_position: tuple    # (x, y, z) in local CARLA coordinates
+
+    # Situation container
+    cause_code: DENMCauseCode = DENMCauseCode.RESERVED
+    subcause_code: int = 0   # Standard-defined per cause_code
+    information_quality: int = 0  # 0 (unavailable) – 7 (fully safe/certain)
+
+    # Location / relevance
+    relevance_distance: float = 150.0    # metres; default = MEDIUM range
+    relevance_traffic_direction: str = "allTrafficDirections"
+    event_speed: Optional[float] = None  # m/s at event location
+    event_heading: Optional[float] = None  # degrees at event location
+
+    # Termination flag (None = active, "isCancellation" = revoked)
+    termination: Optional[str] = None
+
+    # Simulation seconds the event stays valid after ``reference_time`` (None = until cancelled). ETSI's validityDuration
+    # plays this role; here the network drops an expired DENM at its next update.
+    validity_duration: Optional[float] = None
+
+
+def create_cam_from_bsm(bsm: 'BSMCore') -> 'CooperativeAwarenessMessage':
+    """
+    Derive a CAM from an existing BSMCore.
+
+    CAM (ETSI EN 302 637-2) and BSM (SAE J2735) carry equivalent kinematic data.
+    This maps the common fields so the API can expose both formats.
+    """
+    direction = "reverse" if bsm.transmission_state == "reverse" else "forward"
+    return CooperativeAwarenessMessage(
+        station_id=bsm.vehicle_id,
+        generation_time=bsm.timestamp,
+        reference_position=(bsm.x_m, bsm.y_m, bsm.z_m),
+        heading=bsm.heading,
+        speed=bsm.speed,
+        drive_direction=direction,
+        vehicle_role="default",
+        vehicle_length=bsm.vehicle_length,
+        vehicle_width=bsm.vehicle_width,
+    )
+
+
+# Message priority constants
+PRIORITY_ROUTINE = 0
+PRIORITY_HIGH = 1
+PRIORITY_EMERGENCY = 2
+
+# Transmission rates (Hz)
+BSM_RATE_NORMAL = 2  # 2 Hz for normal driving
+BSM_RATE_HIGH = 10  # 10 Hz for critical situations
+CAM_RATE = 2  # 2 Hz for CAM messages
+
+# Communication range (meters)
+V2V_RANGE_SHORT = 50
+V2V_RANGE_MEDIUM = 150
+V2V_RANGE_LONG = 300
+
+# Data sharing thresholds
+SHARE_SENSOR_DATA_DISTANCE = 50  # Share sensor data within 50m
+SHARE_LIDAR_DISTANCE = 30  # Share LiDAR data within 30m
+EMERGENCY_BROADCAST_DISTANCE = 300  # Emergency messages go further

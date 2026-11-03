@@ -14,6 +14,7 @@ build/
 
 # CARLA Data
 data/
+!tests/golden/data/
 FrameWorksV2v/
 *.npy
 *.ply
@@ -56,9 +57,22 @@ temp/
 *.pdf
 docs/_build/
 
+# Runtime / transient files
+=*
+.last_carla_ip
+
 # User notes
 LaurinNotes.md
 V2V_DATA_ACCURACY_AUDIT.md
 V2V_GUIDE.md
 V2V_IMPLEMENTATION.md
+
 *.notes
+
+.env
+.venv/
+stress_test_results_*/
+
+# recorded simulation runs (large, machine-specific)
+runs/
+.coverage

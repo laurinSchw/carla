@@ -3,6 +3,7 @@ carla==0.9.16
 
 # Data processing and analysis
 numpy>=1.24.0
+pydantic>=2.0.0
 
 # Web server and real-time communication
 fastapi>=0.104.0
@@ -10,21 +11,14 @@ uvicorn[standard]>=0.24.0
 websockets>=12.0
 
 # Frontend testing (optional)
-selenium>=4.15.0
 
 # Visualization (optional - install as needed)
 # For LIDAR point cloud visualization
-open3d>=0.18.0
 
 # For camera feeds and image processing
-opencv-python>=4.8.0
 
 # For data analysis and plotting
-matplotlib>=3.7.0
-pandas>=2.0.0
 
-# MQTT transport for V2V communication
-paho-mqtt>=2.0.0
 
 # For web-based dashboards (optional)
 # plotly>=5.18.0

@@ -1,0 +1,14 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: local
+    hooks:
+      - id: pytest-offline
+        name: pytest (no CARLA)
+        entry: python -m pytest tests -m "not carla" -q -p no:cacheprovider
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

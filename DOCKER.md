@@ -44,9 +44,9 @@ Once running, access the web interface at:
 
 | Page | URL | Description |
 |------|-----|-------------|
-| **Control Panel** | http://localhost:8000/ | Main control panel |
-| **LiDAR Viewer** | http://localhost:8000/lidar | 3D point cloud visualization |
-| **V2V Dashboard** | http://localhost:8000/v2v | V2V network status |
+| **Home** | http://localhost:8000/ | Links to the pages below |
+| **Admin panel** | http://localhost:8000/admin | Connect to CARLA, traffic, V2X (admin token required) |
+| **Client join** | http://localhost:8000/client | Join as a vehicle |
 
 ## Architecture
 
@@ -56,7 +56,7 @@ Once running, access the web interface at:
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │              FastAPI Web Server (Port 8000)                 │ │
 │  │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────┐ │ │
-│  │  │Control Panel│  │ LiDAR Viewer │  │   V2V Dashboard     │ │ │
+│  │  │ Admin panel │  │ Client join  │  │   REST / WebSocket  │ │ │
 │  │  └─────────────┘  └──────────────┘  └─────────────────────┘ │ │
 │  └─────────────────────────────────────────────────────────────┘ │
 └───────────────────────────┬─────────────────────────────────────┘
