@@ -64,3 +64,63 @@ def test_s17_spat_timing_is_none_when_carla_cannot_provide_it():
     assert state.likely_time_s is None
     assert state.min_end_time_s is None
     assert state.max_end_time_s is None
+
+
+# ── S9 / S10 / S11 ────────────────────────────────────────────────────────────
+
+def _bsm_vehicle(physics_calls=None):
+    def physics():
+        if physics_calls is not None:
+            physics_calls.append(1)
+        return NS(wheels=[NS(max_steer_angle=70.0)])
+
+    return NS(
+        id=1, type_id="vehicle.tesla.model3", attributes={"number_of_wheels": "4"},
+        bounding_box=NS(extent=_vec(2.3, 0.9, 0.75)),
+        get_transform=lambda: NS(location=_vec(), rotation=NS(yaw=0.0)),
+        get_velocity=lambda: _vec(5.0),
+        get_angular_velocity=lambda: _vec(),
+        get_control=lambda: NS(steer=0.0, brake=0.0, throttle=0.2, reverse=False),
+        get_physics_control=physics,
+        get_world=lambda: NS(),
+    )
+
+
+def _snapshot_with_accel(accel, yaw):
+    actor_snap = NS(
+        get_transform=lambda: NS(location=_vec(), rotation=NS(yaw=yaw)),
+        get_velocity=lambda: _vec(5.0),
+        get_angular_velocity=lambda: _vec(),
+        get_acceleration=lambda: accel,
+    )
+    return NS(timestamp=NS(elapsed_seconds=1.0), find=lambda i: actor_snap)
+
+
+def test_s9_accelerations_are_world_acceleration_projected_on_heading():
+    """Heading +90 deg (CARLA: +y): world accel (0, 2, 0) is purely longitudinal; (1.5, 0, 0) is
+    lateral to the left of travel, i.e. negative (right is positive)."""
+    snap = _snapshot_with_accel(_vec(1.5, 2.0, 0.0), yaw=90.0)
+    bsm = create_bsm_from_carla(_bsm_vehicle(), 1, 0, snapshot=snap, prev_velocity=5.0, delta_time=0.5)
+    assert abs(bsm.longitudinal_accel - 2.0) < 1e-9
+    assert abs(bsm.lateral_accel - (-1.5)) < 1e-9
+
+
+def test_s10_missing_actor_gives_no_bsm_and_is_counted():
+    net = V2XNetwork(update_rate_hz=2.0)
+    net.register(1, _bsm_vehicle())
+    empty = NS(timestamp=NS(elapsed_seconds=1.0), find=lambda i: None)
+    net.update(empty, force=True)
+    assert 1 not in net.bsm_messages
+    assert net.stats["bsm_skipped_not_in_snapshot"] == 1
+
+
+def test_s11_physics_control_is_read_once_at_registration():
+    calls: list = []
+    net = V2XNetwork(update_rate_hz=2.0)
+    net.register(1, _bsm_vehicle(calls))
+    snap = NS(timestamp=NS(elapsed_seconds=1.0), find=lambda i: _snapshot_with_accel(_vec(), 0.0).find(i))
+    for t in (1.0, 1.5, 2.0):
+        snap.timestamp.elapsed_seconds = t
+        net.update(snap)
+    assert len(net.bsm_messages) == 1
+    assert len(calls) == 1

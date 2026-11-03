@@ -137,3 +137,22 @@ window. Now `min_end_time_s`, `max_end_time_s`, `likely_time_s` are `None` (admi
 They always held CARLA world x/y/z in metres, never geodetic degrees. Pure rename, bit-identical values
 (golden BSM files: only the keys changed). No geodetic output exists; add one separately with
 `world.get_map().transform_to_geolocation()` if needed.
+
+### S9 — BSM accelerations come from the snapshot's acceleration vector
+Longitudinal acceleration was Δ|v|/Δt over the 0.5 s update (not longitudinal, heavily low-passed);
+lateral came from a steering-angle bicycle estimate. Now, when the actor snapshot offers
+`get_acceleration()`, both are the world acceleration projected on the heading (forward = (cos yaw, sin yaw),
+right = (−sin yaw, cos yaw); right is positive). Without it the old estimates remain as fallback.
+- Unit test: heading +90°, accel (1.5, 2.0, 0) → longitudinal 2.0, lateral −1.5 m/s².
+- Golden BSMs unchanged (their mocks have no `get_acceleration`). **Not yet verified on live CARLA 0.9.16**
+  (check that `ActorSnapshot.get_acceleration()` is what the Python API documents and the sign convention).
+
+### S10 — no mixed-clock or stale BSMs
+`create_bsm_from_carla` returns `None` if a snapshot is given but the actor is not in it (it used to fall back
+to RPC reads and a wall-clock timestamp). `V2XNetwork.update` skips that station, drops its previous BSM and
+counts it in `stats['bsm_skipped_not_in_snapshot']`. Without any snapshot the old wall-clock fallback remains,
+documented as inaccurate.
+
+### S11 — physics constants cached
+`max_steer_angle` is read once in `V2XNetwork.register` instead of a blocking `get_physics_control()` RPC per
+vehicle per update.

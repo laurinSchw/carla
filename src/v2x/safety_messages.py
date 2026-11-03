@@ -298,7 +298,8 @@ def calculate_threat_level(ego_bsm: BSMCore, other_bsm: BSMCore) -> tuple:
 
 
 def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int, 
-                          snapshot=None, prev_velocity=None, delta_time=0.05) -> BSMCore:
+                          snapshot=None, prev_velocity=None, delta_time=0.05,
+                          max_steer_angle: Optional[float] = None) -> Optional[BSMCore]:
     """
     Create BSM message from CARLA vehicle actor.
     
@@ -313,36 +314,45 @@ def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int,
         snapshot: WorldSnapshot for fresh data (REQUIRED for accuracy)
         prev_velocity: Previous velocity for accel calculation
         delta_time: Time since last update
+        max_steer_angle: Cached max wheel steer angle in degrees (physics constant). When
+            None it is read from the actor (a blocking RPC per call).
     
     Returns:
-        BSMCore instance
+        BSMCore instance, or None when a snapshot was given but the actor is not in it
+        (destroyed this tick). Never mixes sim-time and wall-clock stamps (handoff S10).
     """
-    transform = vehicle.get_transform()
-    sim_timestamp = time.time()
-    
+    snapshot_accel = None  # world-frame acceleration of the actor in this tick, if available
+
     # Get FRESH velocity from snapshot (not cached from previous tick)
     if snapshot:
         actor_snapshot = snapshot.find(vehicle.id)
-        if actor_snapshot:
-            transform = actor_snapshot.get_transform()
-            velocity = actor_snapshot.get_velocity()
-            angular_velocity = actor_snapshot.get_angular_velocity()
-            if hasattr(snapshot, 'timestamp') and hasattr(snapshot.timestamp, 'elapsed_seconds'):
-                sim_timestamp = float(snapshot.timestamp.elapsed_seconds)
+        if not actor_snapshot:
+            return None  # destroyed this tick: skip the station rather than mix clocks (S10)
+        transform = actor_snapshot.get_transform()
+        velocity = actor_snapshot.get_velocity()
+        angular_velocity = actor_snapshot.get_angular_velocity()
+        if hasattr(actor_snapshot, 'get_acceleration'):
+            snapshot_accel = actor_snapshot.get_acceleration()
+        if hasattr(snapshot, 'timestamp') and hasattr(snapshot.timestamp, 'elapsed_seconds'):
+            sim_timestamp = float(snapshot.timestamp.elapsed_seconds)
         else:
-            # Fallback if actor is missing in snapshot (e.g., destroyed this tick).
-            velocity = vehicle.get_velocity()
-            angular_velocity = vehicle.get_angular_velocity()
+            sim_timestamp = time.time()
     else:
-        # Fallback to cached data (SCIENTIFICALLY INACCURATE)
+        # Fallback to cached data (SCIENTIFICALLY INACCURATE): wall-clock stamp
+        transform = vehicle.get_transform()
+        sim_timestamp = time.time()
         velocity = vehicle.get_velocity()
         angular_velocity = vehicle.get_angular_velocity()
     
     # Calculate speed
     speed_ms = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
     
-    # Calculate accelerations
-    if prev_velocity is not None:
+    # Longitudinal acceleration: world acceleration projected on the heading (S9);
+    # falls back to the change of speed magnitude when the snapshot has no acceleration.
+    yaw_rad = math.radians(transform.rotation.yaw)
+    if snapshot_accel is not None:
+        long_accel = snapshot_accel.x * math.cos(yaw_rad) + snapshot_accel.y * math.sin(yaw_rad)
+    elif prev_velocity is not None:
         long_accel = (speed_ms - prev_velocity) / delta_time if delta_time > 0 else 0.0
     else:
         long_accel = 0.0
@@ -352,15 +362,18 @@ def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int,
     
     # Calculate vehicle-specific steering angle
     try:
-        physics_control = vehicle.get_physics_control()
-        max_steer_angle = physics_control.wheels[0].max_steer_angle
+        if max_steer_angle is None:
+            max_steer_angle = vehicle.get_physics_control().wheels[0].max_steer_angle
         steering_angle = control.steer * max_steer_angle
     except Exception:
         # Fallback to generic approximation if physics control unavailable
         steering_angle = control.steer * 70.0
     
-    # Calculate lateral acceleration (simplified centripetal acceleration)
-    if abs(control.steer) > 0.01 and speed_ms > 0.1:
+    # Lateral acceleration: world acceleration projected on the right vector (S9; positive = right,
+    # CARLA is left-handed with y to the right); otherwise a steering-angle bicycle estimate.
+    if snapshot_accel is not None:
+        lateral_accel = -snapshot_accel.x * math.sin(yaw_rad) + snapshot_accel.y * math.cos(yaw_rad)
+    elif abs(control.steer) > 0.01 and speed_ms > 0.1:
         # Use wheelbase from vehicle dimensions
         wheelbase = vehicle.bounding_box.extent.x * 2 * 0.6  # Approximate 60% of length
         try:

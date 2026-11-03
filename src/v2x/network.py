@@ -92,6 +92,9 @@ class V2XNetwork:
         # Previous speeds for BSM acceleration estimation
         self.prev_speeds: Dict[int, float] = {}
 
+        # Physics constants cached at registration (get_physics_control is a blocking RPC)
+        self._max_steer_deg: Dict[int, Optional[float]] = {}
+
         # Timing
         self.last_update_time = 0.0
         self.last_update_sim_time: Optional[float] = None
@@ -107,6 +110,7 @@ class V2XNetwork:
             'cooperative_shares': 0,
             'total_update_count': 0,          # number of 2 Hz ticks executed
             'measured_update_hz': 0.0,        # achieved update rate (wall clock)
+            'bsm_skipped_not_in_snapshot': 0,  # stations absent from the snapshot (destroyed this tick)
         }
         self._first_update_wall_time: Optional[float] = None
 
@@ -154,6 +158,10 @@ class V2XNetwork:
         self.msg_counters[vehicle_id] = 0
         self.neighbors[vehicle_id] = []
         self.prev_speeds[vehicle_id] = 0.0
+        try:
+            self._max_steer_deg[vehicle_id] = vehicle.get_physics_control().wheels[0].max_steer_angle
+        except Exception:
+            self._max_steer_deg[vehicle_id] = None  # BSM creation falls back to the actor query
         
         if self.world is None:
             self.world = vehicle.get_world()
@@ -168,6 +176,7 @@ class V2XNetwork:
         self.msg_counters.pop(vehicle_id, None)
         self.neighbors.pop(vehicle_id, None)
         self.prev_speeds.pop(vehicle_id, None)
+        self._max_steer_deg.pop(vehicle_id, None)
 
         logger.debug(f"Vehicle {vehicle_id} unregistered from V2V network")
     
@@ -222,6 +231,10 @@ class V2XNetwork:
         # ── Phase 1: Build BSMs from current CARLA snapshot ──────────────────
         for vehicle_id, vehicle in self.vehicles.items():
             bsm = self._create_bsm(vehicle, vehicle_id, snapshot, delta_time)
+            if bsm is None:  # not in this snapshot: no stale BSM, no fabricated one
+                self.bsm_messages.pop(vehicle_id, None)
+                self.stats['bsm_skipped_not_in_snapshot'] += 1
+                continue
             self.bsm_messages[vehicle_id] = bsm
             successful_sends += 1
 
@@ -256,7 +269,7 @@ class V2XNetwork:
         return True
     
     def _create_bsm(self, vehicle: carla.Actor, vehicle_id: int, 
-                    snapshot, delta_time: float) -> BSMCore:
+                    snapshot, delta_time: float) -> Optional[BSMCore]:
         """Create BSM message from CARLA vehicle"""
         prev_speed = self.prev_speeds.get(vehicle_id, 0.0)
         msg_count = self.msg_counters.get(vehicle_id, 0)
@@ -265,7 +278,8 @@ class V2XNetwork:
             vehicle, vehicle_id, msg_count,
             snapshot=snapshot,  # Pass snapshot for fresh data
             prev_velocity=prev_speed,
-            delta_time=delta_time
+            delta_time=delta_time,
+            max_steer_angle=self._max_steer_deg.get(vehicle_id),
         )
 
     def _extract_snapshot_time(self, snapshot) -> Optional[float]:

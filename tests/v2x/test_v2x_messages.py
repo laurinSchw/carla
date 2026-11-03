@@ -120,9 +120,13 @@ class _MockWalker:
 
 
 class _MockSnapshot:
-    """Minimal snapshot that returns nothing (forces fallback to actor.get_*)."""
+    """Minimal snapshot. Without vehicles it finds no actor (BSMs are then skipped, S10);
+    pass the vehicles to make them visible in this tick."""
+    def __init__(self, *vehicles):
+        self._vehicles = {v.id: v for v in vehicles}
+
     def find(self, actor_id):
-        return None
+        return self._vehicles.get(actor_id)  # a vehicle mock offers the same getters as an ActorSnapshot
 
     @property
     def timestamp(self):
@@ -537,7 +541,7 @@ class TestV2XNetwork(unittest.TestCase):
         net.register(0, veh0)
         net.register(1, veh1)
 
-        net.update(snapshot=_MockSnapshot(), force=True)
+        net.update(snapshot=_MockSnapshot(veh0, veh1), force=True)
 
         # Both vehicles are within 200 m range and transparent channel → neighbors
         nbrs = net.get_neighbors(0)

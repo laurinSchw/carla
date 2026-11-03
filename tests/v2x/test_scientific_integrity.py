@@ -189,16 +189,13 @@ class TestScientificIntegrity(unittest.TestCase):
         self.assertEqual(level, 4)
         self.assertTrue(math.isfinite(ttc))
 
-    def test_bsm_fallback_when_actor_missing_from_snapshot(self):
-        """If snapshot lookup fails, BSM generation should safely fall back to actor getters."""
+    def test_bsm_skipped_when_actor_missing_from_snapshot(self):
+        """Actor not in the snapshot (destroyed this tick): no BSM, never a mixed-clock one (S10)."""
         vehicle = MockVehicle(1, x=12.0, y=6.0, speed_x=8.0)
         empty_snapshot = MockWorldSnapshot([], elapsed_seconds=10.0)
 
         bsm = create_bsm_from_carla(vehicle, vehicle_id=1, msg_count=3, snapshot=empty_snapshot, prev_velocity=6.0, delta_time=0.5)
-        self.assertEqual(bsm.vehicle_id, 1)
-        self.assertAlmostEqual(bsm.x_m, 12.0)
-        self.assertAlmostEqual(bsm.y_m, 6.0)
-        self.assertGreaterEqual(bsm.speed, 0.0)
+        self.assertIsNone(bsm)
 
     def test_bsm_uses_snapshot_time_and_transform(self):
         vehicle = MockVehicle(1, x=0.0, y=0.0, speed_x=5.0)
