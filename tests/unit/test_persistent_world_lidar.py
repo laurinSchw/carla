@@ -185,3 +185,14 @@ def test_frames_follow_the_carla_frame_id_not_a_wall_clock_counter(env):
     header, _ = protocol.decode(got[-1][1])
     assert 1000 < header.frame <= rec.frame
     assert header.sim_time == pytest.approx(header.frame * 0.05, abs=0.2)
+
+
+def test_status_reports_tick_and_phase_timings(env):
+    rec, make = env
+    srv = make()
+    session, _ = _join(srv)
+    assert _wait(lambda: srv.get_status()["timing_ms"]["tick"].get("n", 0) >= 10)
+    t = srv.get_status()["timing_ms"]
+    for phase in ("tick", "world_tick", "lidar"):
+        assert t[phase]["n"] > 0 and 0 <= t[phase]["p50"] <= t[phase]["p95"] <= t[phase]["max"], (phase, t[phase])
+    assert t["tick"]["p95"] >= t["world_tick"]["p50"]          # a tick contains the world tick

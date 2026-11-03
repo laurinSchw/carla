@@ -97,8 +97,12 @@ class V2XNetwork:
         self.prev_speeds: Dict[int, float] = {}
         self._frame_for_links = -1
 
+        # duration (ms) of each phase of the last update, for diagnosing slow ticks (see get_phase_timing)
+        self.phase_ms: Dict[str, float] = {}
+
         # Physics constants cached at registration (get_physics_control is a blocking RPC)
         self._max_steer_deg: Dict[int, Optional[float]] = {}
+        self._extent: Dict[int, Optional[tuple]] = {}  # bounding-box half extents (blocking RPC to read)
 
         # Timing
         self.last_update_time = 0.0
@@ -178,6 +182,11 @@ class V2XNetwork:
             self._max_steer_deg[vehicle_id] = vehicle.get_physics_control().wheels[0].max_steer_angle
         except Exception:
             self._max_steer_deg[vehicle_id] = None  # BSM creation falls back to the actor query
+        try:
+            e = vehicle.bounding_box.extent
+            self._extent[vehicle_id] = (e.x, e.y, e.z)
+        except Exception:
+            self._extent[vehicle_id] = None
         
         if self.world is None:
             self.world = vehicle.get_world()
@@ -193,6 +202,7 @@ class V2XNetwork:
         self.neighbors.pop(vehicle_id, None)
         self.prev_speeds.pop(vehicle_id, None)
         self._max_steer_deg.pop(vehicle_id, None)
+        self._extent.pop(vehicle_id, None)
 
         logger.debug(f"Vehicle {vehicle_id} unregistered from V2V network")
     
@@ -243,6 +253,7 @@ class V2XNetwork:
             self.last_update_sim_time = sim_time
 
         successful_sends = 0
+        t_phase = time.perf_counter()
 
         # ── Phase 1: Build BSMs from current CARLA snapshot ──────────────────
         for vehicle_id, vehicle in self.vehicles.items():
@@ -258,6 +269,7 @@ class V2XNetwork:
             self.msg_counters[vehicle_id] = (self.msg_counters[vehicle_id] + 1) % 128
             self.prev_speeds[vehicle_id] = bsm.speed
 
+        t_bsm = time.perf_counter()
         # ── Phase 2: Run DSRC/WAVE channel model ─────────────────────────────
         # Positions come from bsm.x_m / bsm.y_m: CARLA world X/Y in metres, not geodetic degrees.
         positions: Dict[int, Tuple[float, float]] = {
@@ -272,15 +284,23 @@ class V2XNetwork:
         )
         self.last_links = self._dsrc_channel.last_links
 
+        t_channel = time.perf_counter()
         # ── Phase 3: Neighbor discovery using channel-filtered BSM view ───────
         self._discover_neighbors()
+        t_discover = time.perf_counter()
 
         # ── Phase 4: Threat assessment ────────────────────────────────────────
         self._assess_threats()
+        t_threats = time.perf_counter()
 
         # ── Phase 5: Statistics ───────────────────────────────────────────────
         self._update_stats()
         self.stats['total_messages_sent'] += successful_sends
+        self.phase_ms = {
+            "bsm": (t_bsm - t_phase) * 1000.0, "channel": (t_channel - t_bsm) * 1000.0,
+            "discover": (t_discover - t_channel) * 1000.0, "threats": (t_threats - t_discover) * 1000.0,
+            "stations": float(len(self.bsm_messages)),
+        }
 
         logger.debug(
             "V2V update: %d vehicles, avg %.1f neighbours, channel PRR=%.3f",
@@ -302,6 +322,7 @@ class V2XNetwork:
             prev_velocity=prev_speed,
             delta_time=delta_time,
             max_steer_angle=self._max_steer_deg.get(vehicle_id),
+            extent=self._extent.get(vehicle_id),
         )
 
     def _extract_snapshot_time(self, snapshot) -> Optional[float]:
@@ -656,7 +677,9 @@ class V2XNetwork:
         sim_time = self._last_sim_time()
         self._update_rsu(sim_time)
         self._update_vru(snapshot, sim_time)
+        t_infra = time.perf_counter()
         self._deliver_infrastructure_messages(getattr(snapshot, "frame", -1), sim_time)
+        self.phase_ms["infrastructure"] = (time.perf_counter() - t_infra) * 1000.0
         return True
 
     # ── Internal helpers ───────────────────────────────────────────────────────

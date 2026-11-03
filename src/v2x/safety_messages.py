@@ -317,7 +317,8 @@ def calculate_threat_level(ego_bsm: BSMCore, other_bsm: BSMCore) -> tuple:
 
 def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int, 
                           snapshot=None, prev_velocity=None, delta_time=0.05,
-                          max_steer_angle: Optional[float] = None) -> Optional[BSMCore]:
+                          max_steer_angle: Optional[float] = None,
+                          extent: Optional[tuple] = None) -> Optional[BSMCore]:
     """
     Create BSM message from CARLA vehicle actor.
     
@@ -334,6 +335,9 @@ def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int,
         delta_time: Time since last update
         max_steer_angle: Cached max wheel steer angle in degrees (physics constant). When
             None it is read from the actor (a blocking RPC per call).
+        extent: Cached bounding-box half extents (x, y, z) in metres. ``vehicle.bounding_box`` is a blocking
+            RPC (~1.1 ms measured on a LAN CARLA server) and a vehicle's size never changes, so callers that
+            create BSMs every update should cache it; None reads it from the actor.
     
     Returns:
         BSMCore instance, or None when a snapshot was given but the actor is not in it
@@ -387,13 +391,17 @@ def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int,
         # Fallback to generic approximation if physics control unavailable
         steering_angle = control.steer * 70.0
     
+    if extent is None:
+        bb = vehicle.bounding_box
+        extent = (bb.extent.x, bb.extent.y, bb.extent.z)
+
     # Lateral acceleration: world acceleration projected on the right vector (S9; positive = right,
     # CARLA is left-handed with y to the right); otherwise a steering-angle bicycle estimate.
     if snapshot_accel is not None:
         lateral_accel = -snapshot_accel.x * math.sin(yaw_rad) + snapshot_accel.y * math.cos(yaw_rad)
     elif abs(control.steer) > 0.01 and speed_ms > 0.1:
         # Use wheelbase from vehicle dimensions
-        wheelbase = vehicle.bounding_box.extent.x * 2 * 0.6  # Approximate 60% of length
+        wheelbase = extent[0] * 2 * 0.6  # Approximate 60% of length
         try:
             turn_radius = wheelbase / abs(math.tan(math.radians(steering_angle)))
             lateral_accel = (speed_ms ** 2) / turn_radius * math.copysign(1, control.steer)
@@ -422,10 +430,9 @@ def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int,
         trans_state = "neutral"
     
     # Get bounding box for vehicle dimensions
-    bbox = vehicle.bounding_box
-    vehicle_length = bbox.extent.x * 2
-    vehicle_width = bbox.extent.y * 2
-    vehicle_height = bbox.extent.z * 2
+    vehicle_length = extent[0] * 2
+    vehicle_width = extent[1] * 2
+    vehicle_height = extent[2] * 2
     
     return BSMCore(
         timestamp=sim_timestamp,

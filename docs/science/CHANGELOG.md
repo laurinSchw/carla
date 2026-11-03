@@ -290,3 +290,24 @@ CARLA on that PC answers on RPC port **2002** (streaming 2003), not 2000.
   keeps the newest 8 frames (`MAX_QUEUED_FRAMES`) and counts drops.
 - **Operational lesson:** two servers connected to one CARLA world both tick it (observed: idle rate doubled to 39.7 FPS, requests timed out).
   Run exactly one server per CARLA world; the Docker container and a local `start_server.py` must not both be connected.
+
+### Live performance follow-up (2026-11-03, CARLA PC 192.168.0.104:2002)
+`GET /admin/status` now has `timing_ms` (p50 / p95 / max over the last ~1000 samples of `tick`, `world_tick`, `lidar`, `v2x_update`,
+`v2x_publish`; `tick` is the work per frame without the pacing sleep, 50 ms is the 20 FPS budget) and `v2x_phase_ms` (bsm / channel /
+discover / threats / infrastructure of the last V2X update, plus the station count).
+
+- **Root cause of the remaining slowdown with traffic: blocking CARLA RPCs per vehicle.** Measured on the real server: `vehicle.bounding_box`
+  **1.1 ms** and `get_physics_control()` **1.0 ms** per access; `get_control()`, `get_transform()`, `snapshot.find()` and the snapshot
+  accessors are local (≈ 0.001 ms). `create_bsm_from_carla` read the bounding box for every vehicle on every update: BSM phase **104 ms for
+  50 vehicles**. Now cached at registration (like the steering limit): **1.0 ms**.
+- **V2X update with 50 stations, live:** p95 140 ms → **54 ms** (channel ≈ 46 ms, infrastructure ≈ 15 ms, BSM 1 ms, discovery/threats ≈ 3 ms).
+  The update runs every 10th frame, so ≈ 5 ms per frame on average.
+- **Simulation rate (frame counter; target 20):** idle 20.0 · traffic only with V2X penetration 0 → **19.9**, V2X off → **20.0**,
+  penetration 1.0 → 17.1 (before the BSM fix) · 3 LiDAR 19.4 · 3 LiDAR + 50 vehicles + 20 pedestrians **14.3** (after all fixes).
+- **Phase 4 acceptance number (tick p95 ≤ 50 ms), 3 LiDAR sessions + 50 vehicles + 20 pedestrians: p95 = 79.6 ms, p50 = 15.3 ms — NOT met.**
+  Breakdown at p95: `world_tick` 75.9 ms (CARLA's own `world.tick()` including sensor generation on the lab PC), `lidar` 0.25 ms,
+  `v2x_update` 54.5 ms (one frame in ten). Our own per-frame work is small; the tail is CARLA's `world.tick()` under the combined load
+  (3 semantic LiDARs ≈ 1.5 M rays per frame + 70 actors, on a PC that other people also use). Lower `points_per_second`/`channels`,
+  fewer sessions or traffic, or a dedicated CARLA machine will help; this is a capacity limit of the lab PC, not a defect found in the server code.
+- **Test hygiene:** `tests/server/test_live_lidar.py` counts only sensors attached to its own vehicles (the shared lab world gets foreign
+  LiDARs that appear and disappear), and reports rather than asserts the tick p95.

@@ -30,6 +30,7 @@ they belong to; getters just return the last published dict.
 
 from __future__ import annotations
 
+import collections
 import logging
 import math
 import random
@@ -120,6 +121,9 @@ class PersistentCARLAServer:
         self.on_session_expired: Optional[Callable[[str], None]] = None
 
         # Per-client LiDAR collectors (session_id → LiDARDataCollector)
+        # durations (ms) of recent ticks and their phases, for /admin/status (appended by the simulation thread only)
+        self._timing = {k: collections.deque(maxlen=1000) for k in
+                        ("tick", "world_tick", "lidar", "v2x_update", "v2x_publish")}
         self.lidar: Optional[LidarManager] = None  # created in start(), driven from the simulation thread
 
     # ------------------------------------------------------------------ #
@@ -281,11 +285,16 @@ class PersistentCARLAServer:
             tick_start = time.monotonic()
             try:
                 self._exec.drain()  # submitted work runs here, at a frame boundary
+                t_a = time.monotonic()
                 self._tick()
                 snapshot = self.world.get_snapshot()
+                t_b = time.monotonic()
                 self._publish_telemetry(snapshot)
                 self._lidar_tick(snapshot)
+                t_c = time.monotonic()
                 self._run_periodic_work(snapshot, every_n)
+                self._timing["world_tick"].append((t_b - t_a) * 1000.0)
+                self._timing["lidar"].append((t_c - t_b) * 1000.0)
 
             except RuntimeError as exc:
                 logger.error("Tick error (frame %d): %s", self._frame, exc)
@@ -293,6 +302,7 @@ class PersistentCARLAServer:
                 continue
 
             elapsed = time.monotonic() - tick_start
+            self._timing["tick"].append(elapsed * 1000.0)
             sleep_for = self.fixed_delta_seconds - elapsed
             if sleep_for > 0.001:
                 time.sleep(sleep_for)
@@ -314,8 +324,12 @@ class PersistentCARLAServer:
             self._last_v2x_frame = self._frame
             if self.v2x_network is not None:
                 try:
+                    t0 = time.monotonic()
                     self.v2x_network.update(snapshot)
+                    t1 = time.monotonic()
                     self._publish_v2x()
+                    self._timing["v2x_update"].append((t1 - t0) * 1000.0)
+                    self._timing["v2x_publish"].append((time.monotonic() - t1) * 1000.0)
                 except Exception:
                     logger.exception("V2X update failed at frame %d (simulation continues)", self._frame)
 
@@ -646,7 +660,22 @@ class PersistentCARLAServer:
             "v2x_range": self.v2x_range if v2x else 0,
             "rsu_count": v2x.rsu_count if v2x else 0,
             "vru_count": v2x.vru_count if v2x else 0,
+            "timing_ms": self.get_timing(),
+            "v2x_phase_ms": {k: round(v, 2) for k, v in dict(v2x.phase_ms).items()} if v2x else {},
         }
+
+    def get_timing(self) -> dict:
+        """p50 / p95 / max (ms) over the last ~1000 samples of each phase. ``tick`` is the work per frame (excluding the
+        pacing sleep): the simulation holds 20 FPS only while its p95 stays below ``fixed_delta_seconds`` * 1000."""
+        out = {}
+        for name, samples in self._timing.items():
+            vals = sorted(samples.copy())
+            if not vals:
+                out[name] = {"n": 0}
+                continue
+            out[name] = {"n": len(vals), "p50": round(vals[len(vals) // 2], 2),
+                         "p95": round(vals[min(len(vals) - 1, int(len(vals) * 0.95))], 2), "max": round(vals[-1], 2)}
+        return out
 
     def get_vehicle_telemetry(self, session_id: str) -> Optional[dict]:
         """Last published telemetry for a client's vehicle (stamped with its frame)."""

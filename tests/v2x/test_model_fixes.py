@@ -184,3 +184,36 @@ def test_s12_sim_time_update_rate_is_reported_and_matches_the_configured_rate():
         if frame % 10 == 0:
             net.update(NS(timestamp=NS(elapsed_seconds=t)))
     assert abs(net.stats["measured_sim_update_hz"] - 2.0) < 1e-6
+
+
+def test_bounding_box_and_physics_are_read_once_at_registration_not_per_update():
+    """`vehicle.bounding_box` and `get_physics_control()` are blocking RPCs on a real server (~1 ms each over a LAN).
+    Reading them for every vehicle on every update made 50 vehicles cost ~100 ms per V2X update (measured live)."""
+    reads = {"bbox": 0, "physics": 0}
+
+    class Vehicle:
+        id = 1
+        type_id = "vehicle.tesla.model3"
+        attributes = {"number_of_wheels": "4"}
+
+        @property
+        def bounding_box(self):
+            reads["bbox"] += 1
+            return NS(extent=_vec(2.3, 0.9, 0.75))
+
+        def get_physics_control(self):
+            reads["physics"] += 1
+            return NS(wheels=[NS(max_steer_angle=70.0)])
+
+        get_control = staticmethod(lambda: NS(steer=0.0, brake=0.0, throttle=0.2, reverse=False))
+        get_world = staticmethod(lambda: NS())
+
+    actor_snap = NS(get_transform=lambda: NS(location=_vec(), rotation=NS(yaw=0.0)), get_velocity=lambda: _vec(5.0),
+                    get_angular_velocity=lambda: _vec(), get_acceleration=lambda: _vec())
+    net = V2XNetwork(update_rate_hz=2.0)
+    net.register(1, Vehicle())
+    for t in (1.0, 1.5, 2.0, 2.5):
+        net.update(NS(timestamp=NS(elapsed_seconds=t), find=lambda i: actor_snap))
+    bsm = net.get_bsm(1)
+    assert (bsm.vehicle_length, bsm.vehicle_width, bsm.vehicle_height) == (4.6, 1.8, 1.5)
+    assert reads == {"bbox": 1, "physics": 1}
