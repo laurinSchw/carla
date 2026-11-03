@@ -311,3 +311,6 @@ discover / threats / infrastructure of the last V2X update, plus the station cou
   fewer sessions or traffic, or a dedicated CARLA machine will help; this is a capacity limit of the lab PC, not a defect found in the server code.
 - **Test hygiene:** `tests/server/test_live_lidar.py` counts only sensors attached to its own vehicles (the shared lab world gets foreign
   LiDARs that appear and disappear), and reports rather than asserts the tick p95.
+- **Lighter traffic (the lab PC is modest):** the live test now defaults to `LIVE_TRAFFIC=25` vehicles + `LIVE_PEDESTRIANS=20`. With 3 LiDAR sessions:
+  **17.5 FPS, tick p95 61.9 ms** (p50 16.1 ms; `world_tick` p95 59.2 ms, `lidar` p95 0.28 ms, `v2x_update` max 20.7 ms). Still above the 50 ms p95 target,
+  and again almost entirely CARLA's `world.tick()`. For the 20 FPS target on this PC use fewer LiDAR sessions or lower `points_per_second`.

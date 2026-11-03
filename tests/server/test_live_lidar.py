@@ -119,13 +119,18 @@ def test_leaving_the_session_destroys_its_sensor(live_world, sensor_count):
 
 
 def test_three_lidar_sessions_with_traffic_report_tick_timing_and_keep_our_own_overhead_small(live_world, sensor_count, record_property):
-    """Handoff Phase 4: 3 LiDAR sessions at the default config, 50 vehicles + 20 pedestrians.
+    """Handoff Phase 4: 3 LiDAR sessions at the default config plus background traffic.
+
+    Traffic size comes from LIVE_TRAFFIC (vehicles, default 25) and LIVE_PEDESTRIANS (default 20), so a weaker CARLA
+    machine can be tested without editing the test; the handoff's reference load is 50 vehicles + 20 pedestrians.
 
     Records the achieved simulation rate and the server's tick timing (p50/p95/max per phase, ``/admin/status``).
     The handoff target is a tick p95 <= 50 ms; it is REPORTED, not asserted, because most of it is CARLA's own
     ``world.tick()`` on the lab PC (3 raycast LiDARs = 1.5 M rays per frame, plus whoever else uses that world).
     What this code controls is asserted: LiDAR handling and the V2X update stay cheap, and the simulation keeps moving.
     """
+    vehicles = int(os.environ.get("LIVE_TRAFFIC", "25"))
+    walkers = int(os.environ.get("LIVE_PEDESTRIANS", "20"))
     sessions = []
     try:
         for n in range(3):
@@ -133,17 +138,18 @@ def test_three_lidar_sessions_with_traffic_report_tick_timing_and_keep_our_own_o
         mine = {s["actor_id"] for s in sessions}
         assert _wait(lambda: sensor_count(mine) == 3), "CARLA does not list the 3 sensors"
         assert _wait(lambda: all((_sensor(live_world, s["session_id"]) or {}).get("state") == "active" for s in sessions), 30)
-        assert live_world.json("POST", "/admin/traffic", {"count": 50}, admin=True, timeout=120)[0] == 200
-        assert live_world.json("POST", "/admin/pedestrians", {"count": 20}, admin=True, timeout=120)[0] == 200
+        assert live_world.json("POST", "/admin/traffic", {"count": vehicles}, admin=True, timeout=120)[0] == 200
+        assert live_world.json("POST", "/admin/pedestrians", {"count": walkers}, admin=True, timeout=120)[0] == 200
         time.sleep(2.0)
         _, a = live_world.json("GET", "/admin/status", admin=True)
         t0 = time.time()
         time.sleep(10.0)
         _, b = live_world.json("GET", "/admin/status", admin=True)
         fps = (b["frame"] - a["frame"]) / (time.time() - t0)
-        record_property("sim_fps_3_lidar_70_actors", round(fps, 2))
+        record_property("sim_fps_3_lidar", round(fps, 2))
+        record_property("traffic", f"{vehicles} vehicles + {walkers} pedestrians")
         timing = live_world.json("GET", "/admin/status", admin=True)[1].get("timing_ms", {})
-        print(f"\nsimulation rate with 3 LiDAR sessions + 50 vehicles + 20 pedestrians: {fps:.1f} FPS (target 20)")
+        print(f"\nsimulation rate with 3 LiDAR sessions + {vehicles} vehicles + {walkers} pedestrians: {fps:.1f} FPS (target 20)")
         print("server timing (ms):", json.dumps(timing))
         record_property("tick_p95_ms", timing["tick"]["p95"])
         record_property("world_tick_p95_ms", timing["world_tick"]["p95"])
