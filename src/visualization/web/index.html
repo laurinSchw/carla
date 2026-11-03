@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CARLA V2X Server</title>
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<header id="top"></header>
+<main class="layout" style="max-width: 60rem; margin: 0 auto;">
+  <section class="panel" aria-labelledby="st">
+    <header><h2 id="st">Server status</h2><span class="stamp" id="stamp"></span></header>
+    <dl class="kv" id="status"><dt>CARLA</dt><dd>loading…</dd></dl>
+  </section>
+  <section class="panel" aria-labelledby="pages">
+    <h2 id="pages">Pages</h2>
+    <ul>
+      <li><a href="/observer"><strong>Observer</strong></a>: the V2X research view (map, stations, links, channel statistics); open to everyone unless the server disables it.</li>
+      <li><a href="/vehicle"><strong>Vehicle</strong></a>: join as a vehicle, see what your radio received, request a LiDAR for your car.</li>
+      <li><a href="/admin"><strong>Admin</strong></a>: connection, population, DENM injection, sessions and LiDAR management (token required).</li>
+    </ul>
+    <p class="empty">API reference: <a href="/docs">/docs</a> (interactive) and docs/api.md in the repository.</p>
+  </section>
+</main>
+<script type="module" src="/static/js/index.js"></script>
+</body>
+</html>

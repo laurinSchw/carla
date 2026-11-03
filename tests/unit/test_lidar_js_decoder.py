@@ -13,7 +13,7 @@ import pytest
 
 from src.lidar import protocol
 
-DECODER = Path(__file__).parents[2] / "src" / "visualization" / "web" / "static" / "js" / "lidar-decoder.js"
+DECODER = Path(__file__).parents[2] / "src" / "visualization" / "web" / "static" / "legacy" / "lidar-decoder.js"
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="node is not installed")
 

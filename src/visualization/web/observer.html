@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Observer - CARLA V2X</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+<script type="importmap">{"imports": {"three": "/static/vendor/three/three.module.min.js"}}</script>
+</head>
+<body>
+<header id="top"></header>
+<main class="layout observer">
+  <div class="col">
+    <section class="panel" aria-labelledby="map-h">
+      <header>
+        <h2 id="map-h">Map</h2>
+        <label>View <select id="mode"><option value="truth">Ground truth</option><option value="perspective" disabled>Perspective of selected station</option></select></label>
+        <button id="fit" title="Fit the whole map (key 0)">Fit</button>
+        <label><input type="checkbox" id="follow"> follow selected</label>
+      </header>
+      <div class="mapwrap"><canvas id="map" class="map" data-testid="map"></canvas></div>
+      <div class="layers" id="layers" role="group" aria-label="Map layers"></div>
+      <div class="legend" id="legend" aria-label="Legend"></div>
+    </section>
+    <section class="panel" id="lidar-panel" aria-labelledby="lidar-h" hidden>
+      <header><h2 id="lidar-h">LiDAR</h2></header>
+      <div id="lidar"></div>
+    </section>
+    <section class="panel" aria-labelledby="log-h">
+      <header>
+        <h2 id="log-h">Link log</h2>
+        <span class="stamp" id="log-filter-text"></span>
+      </header>
+      <form id="log-filter" class="row" autocomplete="off">
+        <label>Stations <input id="f-ids" size="14" placeholder="selected, or ids"></label>
+        <label>Role <select id="f-role"><option value="any">tx or rx</option><option value="tx">tx</option><option value="rx">rx</option></select></label>
+        <label>Outcome <select id="f-outcome"><option value="all">all</option><option value="delivered">delivered</option><option value="dropped">dropped</option></select></label>
+        <label>Message <select id="f-msg"><option value="">any</option><option>BSM</option><option>SPAT</option><option>MAP</option><option>VRUAM</option><option>DENM</option><option>CPM</option></select></label>
+        <label>Link <select id="f-link"><option value="">any</option><option>V2V</option><option>I2V</option><option>V2I</option><option>P2V</option><option>V2P</option></select></label>
+      </form>
+      <div id="log"></div>
+    </section>
+  </div>
+  <div class="col">
+    <section class="panel" aria-labelledby="insp-h">
+      <header><h2 id="insp-h">Station inspector</h2><span class="stamp" id="insp-stamp"></span></header>
+      <div id="inspector"></div>
+      <h3>Selected link</h3>
+      <div id="link-details"></div>
+    </section>
+    <section class="panel" aria-labelledby="ch-h">
+      <header>
+        <h2 id="ch-h">Channel analytics</h2>
+        <label>Window <select id="stats-window"><option value="window">last 60 s of sim time</option><option value="run">this run</option></select></label>
+      </header>
+      <h3>Packet reception ratio vs distance</h3>
+      <div id="chart-prr"></div>
+      <h3>Receive margin above sensitivity</h3>
+      <div id="chart-margin"></div>
+      <h3 id="nb-h">Messages received per update (selected station)</h3>
+      <div id="chart-nb"></div>
+      <h3>V2X update rate</h3>
+      <p id="rate-text" class="stamp"></p>
+      <div id="chart-rate"></div>
+    </section>
+    <section class="panel" aria-labelledby="health-h">
+      <header><h2 id="health-h">Health and LiDAR sensors</h2><span class="stamp" id="health-stamp"></span></header>
+      <dl class="kv" id="health"></dl>
+      <div id="sensors"></div>
+    </section>
+  </div>
+</main>
+<script type="module" src="/static/js/observer.js"></script>
+</body>
+</html>

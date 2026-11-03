@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin - CARLA V2X</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+<script type="importmap">{"imports": {"three": "/static/vendor/three/three.module.min.js"}}</script>
+</head>
+<body>
+<header id="top"></header>
+
+<main id="login" class="layout" style="max-width: 32rem; margin: 2rem auto;">
+  <section class="panel" aria-labelledby="login-h">
+    <h2 id="login-h">Admin</h2>
+    <p>The admin token is the <code>ADMIN_TOKEN</code> of the server. It is kept in this tab only (session storage) and sent in a header, never in a URL.</p>
+    <form id="login-form" autocomplete="off">
+      <div class="field"><label for="token">Token</label><input id="token" type="password" required autocomplete="off"><span></span></div>
+      <button class="primary" id="login-btn">Sign in</button>
+    </form>
+  </section>
+</main>
+
+<div id="admin" hidden>
+<main class="layout observer">
+  <div class="col">
+    <section class="panel" aria-labelledby="map-h">
+      <header>
+        <h2 id="map-h">Map</h2>
+        <label>View <select id="mode"><option value="truth">Ground truth</option><option value="perspective" disabled>Perspective of selected station</option></select></label>
+        <button id="fit" title="Fit the whole map (key 0)">Fit</button>
+        <label><input type="checkbox" id="follow"> follow selected</label>
+      </header>
+      <div class="mapwrap"><canvas id="map" class="map" data-testid="map"></canvas></div>
+      <div class="layers" id="layers" role="group" aria-label="Map layers"></div>
+      <div class="legend" id="legend" aria-label="Legend"></div>
+    </section>
+    <section class="panel" id="lidar-panel" aria-labelledby="lidar-h" hidden>
+      <header><h2 id="lidar-h">LiDAR</h2></header>
+      <div id="lidar"></div>
+    </section>
+    <section class="panel" aria-labelledby="log-h">
+      <header><h2 id="log-h">Link log</h2><span class="stamp" id="log-filter-text"></span></header>
+      <form id="log-filter" class="row" autocomplete="off">
+        <label>Stations <input id="f-ids" size="14" placeholder="selected, or ids"></label>
+        <label>Role <select id="f-role"><option value="any">tx or rx</option><option value="tx">tx</option><option value="rx">rx</option></select></label>
+        <label>Outcome <select id="f-outcome"><option value="all">all</option><option value="delivered">delivered</option><option value="dropped">dropped</option></select></label>
+        <label>Message <select id="f-msg"><option value="">any</option><option>BSM</option><option>SPAT</option><option>MAP</option><option>VRUAM</option><option>DENM</option><option>CPM</option></select></label>
+        <label>Link <select id="f-link"><option value="">any</option><option>V2V</option><option>I2V</option><option>V2I</option><option>P2V</option><option>V2P</option></select></label>
+      </form>
+      <div id="log"></div>
+    </section>
+  </div>
+  <div class="col">
+    <section class="panel" aria-labelledby="insp-h">
+      <header><h2 id="insp-h">Station inspector</h2><span class="stamp" id="insp-stamp"></span></header>
+      <div id="inspector"></div>
+      <h3>Selected link</h3>
+      <div id="link-details"></div>
+    </section>
+    <section class="panel" aria-labelledby="ch-h">
+      <header><h2 id="ch-h">Channel analytics</h2>
+        <label>Window <select id="stats-window"><option value="window">last 60 s of sim time</option><option value="run">this run</option></select></label></header>
+      <h3>Packet reception ratio vs distance</h3><div id="chart-prr"></div>
+      <h3>Receive margin above sensitivity</h3><div id="chart-margin"></div>
+      <h3 id="nb-h">Messages received per update (selected station)</h3><div id="chart-nb"></div>
+      <h3>V2X update rate</h3><p id="rate-text" class="stamp"></p><div id="chart-rate"></div>
+    </section>
+    <section class="panel" aria-labelledby="health-h">
+      <header><h2 id="health-h">Health and LiDAR sensors</h2><span class="stamp" id="health-stamp"></span></header>
+      <dl class="kv" id="health"></dl>
+      <div id="sensors"></div>
+    </section>
+  </div>
+</main>
+
+<section class="layout" style="grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); align-items: start;" aria-label="Administration">
+  <section class="panel" id="card-connection" aria-labelledby="c-conn-h">
+    <header><h2 id="c-conn-h">Connection</h2><span class="badge" id="conn-state">unknown</span></header>
+    <form id="connect-form" autocomplete="off">
+      <div class="field"><label for="cn-host">CARLA host</label><input id="cn-host" value="127.0.0.1"><span></span></div>
+      <div class="field"><label for="cn-port">CARLA port</label><input id="cn-port" type="number" value="2000"><span></span></div>
+      <div class="field"><label for="cn-tm">Traffic Manager port</label><input id="cn-tm" type="number" value="8001"><span></span></div>
+      <div class="field"><label for="cn-v2x">V2X</label><label><input id="cn-v2x" type="checkbox" checked> enabled</label><span></span></div>
+      <div class="field"><label for="cn-rate">V2X update rate (Hz)</label><input id="cn-rate" type="number" step="any" value="2"><span class="badge badge-restart">restart</span></div>
+      <div class="field"><label for="cn-rsu">RSU limit</label><input id="cn-rsu" type="number" min="0" placeholder="all intersections"><span class="badge badge-restart">restart</span></div>
+      <div class="row"><button class="primary" id="connect-btn">Connect</button><button class="danger" id="disconnect-btn" type="button">Disconnect</button></div>
+    </form>
+    <p id="conn-error" class="state-error"></p>
+    <p class="stamp">Connecting (re)starts the world: sessions, sensors and the run end. Settings marked restart only apply here.</p>
+  </section>
+
+  <section class="panel" id="card-run" aria-labelledby="c-run-h">
+    <header><h2 id="c-run-h">Run and recording</h2><span class="badge" id="run-badge">no run</span></header>
+    <div class="field"><label for="run-name">Name</label><input id="run-name" value="run" maxlength="64"><span></span></div>
+    <div class="field"><label>Record</label><span id="run-record"></span><span></span></div>
+    <div class="row"><button class="primary" id="run-start">Start run</button><button class="danger" id="run-stop" disabled>Stop run</button></div>
+    <dl class="kv" id="run-status"></dl>
+    <p class="stamp">Files go to <code>runs/&lt;time&gt;_&lt;git sha&gt;_&lt;name&gt;/</code> on the server. The seed and the other restart settings come from Connection; headless, reproducible runs: <code>python -m src.cli run scenario.yaml</code>.</p>
+    <h3>Earlier runs</h3>
+    <div class="scroll"><table id="run-table"><thead><tr><th>run</th><th>status</th><th class="num">updates</th><th></th></tr></thead><tbody></tbody></table></div>
+    <pre id="run-manifest" class="json" hidden></pre>
+  </section>
+
+  <section class="panel" id="card-population" aria-labelledby="c-pop-h">
+    <header><h2 id="c-pop-h">Population</h2><span class="stamp" id="pop-counts"></span></header>
+    <div class="row"><label>Vehicles <input id="pop-veh" type="number" min="1" max="200" value="20" style="width:5em"></label>
+      <button id="pop-veh-add">Spawn</button><button id="pop-veh-clear" class="danger">Clear</button></div>
+    <div class="row"><label>Pedestrians <input id="pop-ped" type="number" min="1" max="100" value="15" style="width:5em"></label>
+      <button id="pop-ped-add">Spawn</button><button id="pop-ped-clear" class="danger">Clear</button></div>
+    <div class="row"><button id="pop-clear-all" class="danger">Clear all</button></div>
+    <p class="stamp">V2X penetration of background vehicles (decision D2): see "Configuration" below; it applies to vehicles spawned after the change.</p>
+  </section>
+
+  <section class="panel" id="card-config" aria-labelledby="c-cfg-h">
+    <header><h2 id="c-cfg-h">Configuration</h2><span class="stamp" id="cfg-stamp"></span></header>
+    <div id="cfg-form"></div>
+    <div class="row"><button class="primary" id="cfg-apply">Apply hot changes</button><button id="cfg-reset" type="button">Reset</button></div>
+    <div id="cfg-result" class="stamp"></div>
+    <p class="stamp"><span class="badge badge-hot">hot</span> changeable now, each change is logged with the frame it was applied at. <span class="badge badge-restart">restart</span> shown for reference; change in Connection and reconnect.</p>
+  </section>
+
+  <section class="panel" id="card-rsus" aria-labelledby="c-rsu-h">
+    <header><h2 id="c-rsu-h">RSUs</h2><span class="stamp" id="rsu-stamp"></span></header>
+    <div class="scroll"><table id="rsu-table"><thead><tr><th>station</th><th>intersection</th><th>enabled</th><th class="num">TX power (dBm)</th><th class="num">range (m)</th><th></th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section class="panel" id="card-denm" aria-labelledby="c-denm-h">
+    <header><h2 id="c-denm-h">DENM injection</h2></header>
+    <div class="field"><label for="dn-cause">Cause</label><select id="dn-cause"></select><span></span></div>
+    <div class="field"><label for="dn-sub">Sub-cause</label><input id="dn-sub" type="number" min="0" max="255" value="0"><span></span></div>
+    <div class="field"><label for="dn-rad">Relevance radius (m)</label><input id="dn-rad" type="number" min="1" max="2000" value="150"><span></span></div>
+    <div class="field"><label for="dn-dur">Validity (sim s)</label><input id="dn-dur" type="number" min="1" placeholder="until cancelled"><span></span></div>
+    <div class="field"><label for="dn-orig">Originator</label><select id="dn-orig"><option value="">fixed roadside transmitter at the event</option></select><span></span></div>
+    <div class="row"><button id="dn-pick">Pick position on the map</button><span id="dn-pos" class="mono">no position</span></div>
+    <div class="row"><button class="primary" id="dn-inject" disabled>Inject DENM</button></div>
+    <h3>Active</h3>
+    <div id="dn-active"></div>
+  </section>
+
+  <section class="panel" id="card-sessions" aria-labelledby="c-sess-h">
+    <header><h2 id="c-sess-h">Sessions</h2></header>
+    <div class="scroll"><table id="sess-table"><thead><tr><th>name</th><th>from</th><th class="num">actor</th><th>remaining</th><th>socket</th><th>LiDAR</th><th></th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section class="panel" id="card-lidar" aria-labelledby="c-lid-h">
+    <header><h2 id="c-lid-h">LiDAR sensors</h2><span class="stamp" id="lid-budget"></span></header>
+    <div class="scroll"><table id="lid-table"><thead><tr><th>sensor</th><th>vehicle</th><th>owner</th><th>state</th><th class="num">viewers</th><th class="num">points/s</th><th>pinned</th><th></th></tr></thead><tbody></tbody></table></div>
+    <details><summary>Attach a sensor to a vehicle</summary>
+      <div class="field"><label for="lid-veh">Vehicle</label><select id="lid-veh"></select><span></span></div>
+      <div class="field"><label for="lid-pin">Pinned</label><label><input id="lid-pin" type="checkbox"> never auto-release</label><span></span></div>
+      <div id="lid-form"></div>
+      <div class="row"><button class="primary" id="lid-attach">Attach</button></div>
+    </details>
+  </section>
+
+  <section class="panel" id="card-hub" aria-labelledby="c-hub-h">
+    <header><h2 id="c-hub-h">WebSocket clients</h2><span class="stamp" id="hub-rate"></span></header>
+    <div class="scroll"><table id="hub-table"><thead><tr><th>role</th><th>name</th><th>topics</th><th class="num">connected (s)</th><th class="num">sent</th></tr></thead><tbody></tbody></table></div>
+  </section>
+</section>
+</div>
+<script type="module" src="/static/js/admin.js"></script>
+</body>
+</html>

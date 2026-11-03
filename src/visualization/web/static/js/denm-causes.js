@@ -1,0 +1,25 @@
+// ETSI EN 302 637-3 cause codes as the server's DENMCauseCode enum has them (src/v2x/messages/denm.py).
+// A Node test compares this list with the Python enum, so they cannot drift apart.
+export const DENM_CAUSES = [
+  [0, 'RESERVED'],
+  [1, 'TRAFFIC_CONDITION'],
+  [2, 'ACCIDENT'],
+  [3, 'ROAD_WORKS'],
+  [6, 'ADVERSE_WEATHER_ADHESION'],
+  [9, 'HAZARDOUS_SURFACE'],
+  [10, 'OBSTACLE_ON_ROAD'],
+  [11, 'ANIMAL_ON_ROAD'],
+  [14, 'HUMAN_PRESENCE_ON_ROAD'],
+  [17, 'WRONG_WAY_DRIVING'],
+  [18, 'RESCUE_RECOVERY_IN_PROGRESS'],
+  [26, 'SLOW_VEHICLE'],
+  [91, 'VEHICLE_BREAKDOWN'],
+  [92, 'POST_CRASH'],
+  [93, 'HUMAN_PROBLEM'],
+  [94, 'STATIONARY_VEHICLE'],
+  [95, 'EMERGENCY_VEHICLE_APPROACHING'],
+  [96, 'DANGEROUS_CURVE'],
+  [97, 'COLLISION_RISK'],
+  [98, 'SIGNAL_VIOLATION'],
+  [99, 'DANGEROUS_END_OF_QUEUE'],
+];

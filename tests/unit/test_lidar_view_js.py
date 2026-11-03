@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 WEB = Path(__file__).parents[2] / "src" / "visualization" / "web"
-STATIC = WEB / "static" / "js"
+STATIC = WEB / "static" / "legacy"
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="node is not installed")
 

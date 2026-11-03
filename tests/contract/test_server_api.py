@@ -344,8 +344,9 @@ def test_leaving_the_session_destroys_its_sensor(client, world):
 
 def test_lidar_schema_lists_valid_attributes_per_sensor_type(client, world):
     schema = client.get("/client/lidar/schema").json()
-    assert "noise_stddev" not in schema["sensor_types"]["semantic"]["attributes"]
-    assert "noise_stddev" in schema["sensor_types"]["raycast"]["attributes"]
+    names = lambda t: [a["name"] for a in schema["sensor_types"][t]["attributes"]]
+    assert "noise_stddev" not in names("ray_cast_semantic") and "noise_stddev" in names("ray_cast")
+    assert "mount.z_m" in names("ray_cast_semantic") and schema["protocol_version"] == 3
     assert schema["stream_point_buckets"] == [10000, 25000, 50000, "all"]
     tags = {t["id"]: t for t in schema["semantic_tags"]}
     assert tags[14]["name"] == "Car" and tags[12]["name"] == "Pedestrian" and len(tags[1]["color"]) == 3
@@ -379,11 +380,11 @@ def test_lidar_endpoints_reject_unknown_sessions(client, world):
 
 def test_lidar_viewer_scripts_are_served_as_javascript(client):
     for name in ("lidar-decoder.js", "lidar-view.js"):
-        r = client.get(f"/static/js/{name}")
+        r = client.get(f"/static/legacy/{name}")
         assert r.status_code == 200 and "javascript" in r.headers["content-type"], name
-    assert "LidarDecoder" in client.get("/static/js/lidar-decoder.js").text
+    assert "LidarDecoder" in client.get("/static/legacy/lidar-decoder.js").text
     page = client.get("/client").text
-    assert "/static/js/lidar-decoder.js" in page and 'id="lidarCanvas"' in page
+    assert "/static/legacy/lidar-decoder.js" in page and 'id="lidarCanvas"' in page
 
 
 # --- run recording --------------------------------------------------------

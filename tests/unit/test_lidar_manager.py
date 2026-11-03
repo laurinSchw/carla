@@ -388,8 +388,8 @@ def test_rotation_frequency_must_match_the_simulation_step():
 
 def test_semantic_sensor_rejects_raycast_only_attributes():
     with pytest.raises(ValueError, match="ray_cast"):
-        LidarConfig(sensor_type="semantic", noise_stddev=0.1)
-    c = LidarConfig(sensor_type="raycast", noise_stddev=0.1).resolve(0.05)
+        LidarConfig(sensor_type="ray_cast_semantic", noise_stddev=0.1)
+    c = LidarConfig(sensor_type="ray_cast", noise_stddev=0.1).resolve(0.05)
     assert c.blueprint_id == "sensor.lidar.ray_cast" and c.blueprint_attributes()["noise_stddev"] == "0.1"
 
 
