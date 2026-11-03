@@ -1,7 +1,11 @@
 # Audit — Scientific Accuracy & Code-Quality Backlog
 
+> **STALE — do not trust the "RESOLVED" claims.** REFACTOR_HANDOFF.md §3.2 (S1) shows the P2 calibration
+> numbers are false (code gives -56.9 / -63.9 / -78.5 dBm, not -71 / -77 / -87). Paths below use
+> pre-merge names (`src/v2v/…`). To be superseded by `docs/science/model.md` (Phase 3).
+
 > **Status:** open — generated from a code review of the V2V/V2X core on 2026-08-20.
-> **Scope:** `src/v2v/*`, `src/v2x/*`, `docs/V2V_DATA_ACCURACY_AUDIT.md`.
+> **Scope:** `src/v2x/*`, `src/v2x/*`, `docs/V2V_DATA_ACCURACY_AUDIT.md`.
 > **How to use:** each item has `[ ]` to check off. Move to `done` once fixed + verified.
 >
 > Severity legend: 🔴 high (wrong results / miscited science) · 🟡 medium ·
@@ -11,7 +15,7 @@
 
 ## ✅ P1 — CSMA/CA contention term FIXED (2026-08-20)
 - **Status:** ✅ **RESOLVED** — replaced with density-aware model
-- **Where:** `src/v2v/dsrc_channel.py:287-315` (`_csma_success_prob`)
+- **Where:** `src/v2x/dsrc_channel.py:287-315` (`_csma_success_prob`)
 - **What was done:** Replaced broken `(1 - CBR) ** (N-1)` formula with density-aware exponential decay model calibrated to empirical 802.11p measurements.
   
   New model provides realistic PRR degradation:
@@ -27,7 +31,7 @@
 
 ## ✅ P2 — RF / PRR path FIXED for realistic 10-150m variation (2026-08-20)
 - **Status:** ✅ **RESOLVED** — calibrated path loss exponents and shadowing
-- **Where:** `src/v2v/dsrc_channel.py:237-285` (`_received_power_dbm`, `_compute_prr`)
+- **Where:** `src/v2x/dsrc_channel.py:237-285` (`_received_power_dbm`, `_compute_prr`)
 - **What was done:** Increased path loss exponents and shadowing standard deviations to create meaningful PRR variation within typical V2V ranges:
   
   Updated parameters:
@@ -64,7 +68,7 @@
 - [ ] Correct citation to EN 302 663 Class C
 
 ## 🟡 P5 — NLOS occlusion oversells itself
-- **Where:** `src/v2v/dsrc_channel.py:304-325` (`_is_nlos`)
+- **Where:** `src/v2x/dsrc_channel.py:304-325` (`_is_nlos`)
 - **Problem:** any vehicle within 2.5 m of the TX→RX segment flags NLOS — falsely triggers
   for two cars merely driving near each other on open road. Real CARLA occluders are
   buildings. Docstring claims "sufficient for urban block geometry as used by Sommer et al."
@@ -72,7 +76,7 @@
 - [ ] Or soften the claim in the docstring
 
 ## 🟡 P6 — Three contradictory "range" definitions
-- **Where:** `src/v2v/messages.py:518` (`V2V_RANGE_MEDIUM = 150`),
+- **Where:** `src/v2x/messages.py:518` (`V2V_RANGE_MEDIUM = 150`),
   `src/config.py:70` (`V2VConfig.max_range = 50`),
   `start_server.py` (`--v2x-range` default `75`).
 - **Problem:** `max_range` is a hard app-layer cutoff in neighbor discovery; the physical
@@ -81,14 +85,14 @@
 - [ ] Pick one canonical range (config-driven) and document the app-layer vs RF split
 
 ## 🟢 P7 — `DENMCauseCode` values need a standards cross-check
-- **Where:** `src/v2v/messages.py:427-452`
+- **Where:** `src/v2x/messages.py:427-452`
 - **Problem:** several assignments (e.g. `animalOnRoad=11`, `humanPresenceOnRoad=14`,
   `wrongWayDriving=17`) don't clearly match the current ETSI EN 302 637-3 causeCode table.
   Risk: published data uses wrong codes.
 - [ ] Cross-check against current ETSI EN 302 637-3 table; correct mismatches
 
 ## 🟢 P8 — Lateral accel derived from commanded steer, not measured kinematics
-- **Where:** `src/v2v/messages.py:362-372`
+- **Where:** `src/v2x/messages.py:362-372`
 - **Problem:** `lateral_accel` uses `control.steer * max_steer_angle`, not measured lateral
   velocity. Acceptable as a sim proxy but should be labeled "estimated."
 - [ ] Label as estimated / add measured-kinematics variant
@@ -100,7 +104,7 @@
 - [ ] Derive window from actual green/yellow/red durations
 
 ## 🟢 P10 — Mixed clocks in update rate measurement
-- **Where:** `src/v2v/network_enhanced.py:344-351`
+- **Where:** `src/v2x/network.py:344-351`
 - **Problem:** updates gated by sim time but `measured_update_hz` uses wall clock → diverges
   if sim ≠ realtime.
 - [ ] Use sim-time delta for `measured_update_hz`
