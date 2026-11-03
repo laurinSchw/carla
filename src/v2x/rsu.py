@@ -160,7 +160,7 @@ class RoadSideUnit:
 
         Each registered TrafficLight actor contributes one SPATMovementState.
         Phase timing is derived from CARLA's elapsed / phase-duration API;
-        when timing is unavailable the window defaults to ±1 s around now.
+        when timing is unavailable the end times are None (never a made-up value).
         """
         state_map = _build_carla_state_map()
         states: List[SPATMovementState] = []
@@ -171,12 +171,18 @@ class RoadSideUnit:
                 movement_event = state_map.get(tl_state, "unavailable")
                 remaining = self._remaining_time(tl)
 
+                if remaining is None:  # never invent timing: report it as unknown
+                    min_end = max_end = likely = None
+                else:
+                    min_end = timestamp + max(remaining - 1.0, 0.0)
+                    max_end = timestamp + remaining + 1.0
+                    likely = timestamp + remaining
                 states.append(SPATMovementState(
                     signal_group_id=sg_id,
                     movement_event=movement_event,
-                    min_end_time_s=timestamp + max(remaining - 1.0, 0.0),
-                    max_end_time_s=timestamp + remaining + 1.0,
-                    likely_time_s=timestamp + remaining,
+                    min_end_time_s=min_end,
+                    max_end_time_s=max_end,
+                    likely_time_s=likely,
                 ))
             except Exception as exc:
                 logger.debug(
@@ -194,8 +200,8 @@ class RoadSideUnit:
     # ── helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
-    def _remaining_time(traffic_light) -> float:
-        """Best-effort remaining phase time from the CARLA API (seconds)."""
+    def _remaining_time(traffic_light) -> Optional[float]:
+        """Remaining phase time from the CARLA API (seconds), or None when it cannot be read."""
         try:
             import carla
             state = traffic_light.get_state()
@@ -208,4 +214,4 @@ class RoadSideUnit:
                 return max(traffic_light.get_red_time() - elapsed, 0.0)
         except Exception:
             pass
-        return 5.0  # safe fallback
+        return None

@@ -299,8 +299,8 @@ async def list_spat():
                     "signal_group_id": s.signal_group_id,
                     "movement_event": s.movement_event,
                     "likely_time_s": round(s.likely_time_s, 1) if s.likely_time_s is not None else None,
-                    "min_end_time_s": round(s.min_end_time_s, 1),
-                    "max_end_time_s": round(s.max_end_time_s, 1),
+                    "min_end_time_s": round(s.min_end_time_s, 1) if s.min_end_time_s is not None else None,
+                    "max_end_time_s": round(s.max_end_time_s, 1) if s.max_end_time_s is not None else None,
                 }
                 for s in spat.states
             ],

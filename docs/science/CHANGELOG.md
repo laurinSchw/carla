@@ -105,3 +105,30 @@ No V2X/channel model change (golden tests unchanged). Fixes handoff defects:
 - NOT verified against a real CARLA server: that actors spawned by `apply_batch_sync(..., False)` are
   visible to `world.get_actor` before the next tick, and that destroy batches without a tick behave.
   TODO(verify) - run `tests/server` with CARLA_HOST/CARLA_PORT (traffic/pedestrian/join tests).
+
+## Phase 3 — model fixes (2026-11-03, branch `developer`)
+
+Each item changes results; golden BSM files regenerated deliberately (`UPDATE_GOLDEN=1`).
+Regression tests: `tests/v2x/test_model_fixes.py`.
+
+### S2 — BSM yaw rate was inflated ×57.3
+`create_bsm_from_carla` applied `math.degrees()` to `get_angular_velocity().z`, which CARLA already
+returns in deg/s. Fix: use the value as is.
+- Golden `bsm_from_snapshot` / `bsm_braking_reverse` (mock angular velocity 0.5 deg/s):
+  `yaw_rate` 28.64788975654116 → 0.5. No other BSM field changed.
+- Affects every consumer of `BSMCore.yaw_rate` (threat/telemetry). Not yet verified against live CARLA 0.9.16.
+
+### C7 — 2 Hz V2X update was skipped by a float-accumulation gate
+The server gates on frames (every 10th) and the network gated again on sim-time Δ ≥ 0.5 s; with
+accumulated `+= 0.05` the Δ is sometimes 0.4999… and the update was dropped.
+Fix: 1e-6 s tolerance in `V2XNetwork` gate.
+- Reproduction in the new test (7200 frames, dt 0.05, update on every 10th frame, `update_rate_hz=2`):
+  618 of 720 updates performed (≈1.72 Hz effective) → 720 of 720 (2.00 Hz).
+- Effect: more BSM/channel ticks per run; neighbour statistics and DSRC RNG consumption differ for the
+  same seed compared with earlier runs.
+
+### S17 — SPAT no longer invents phase timing
+When CARLA's phase timers could not be read, `RoadSideUnit` emitted `remaining = 5.0 s` with a ±1 s
+window. Now `min_end_time_s`, `max_end_time_s`, `likely_time_s` are `None` (admin route and
+`get_vehicle_v2x_data` already pass `None` through; the admin route's min/max rounding was made None-safe).
+- Before: unreadable timer → likely end = now + 5.0 s. After: `null`.

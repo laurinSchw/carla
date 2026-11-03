@@ -371,8 +371,8 @@ def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int,
     else:
         lateral_accel = 0.0
     
-    # Get yaw rate from angular velocity (convert rad/s to deg/s)
-    yaw_rate = math.degrees(angular_velocity.z)
+    # CARLA's get_angular_velocity() is already in deg/s (no conversion; handoff S2)
+    yaw_rate = angular_velocity.z
     
     # Determine brake status
     if control.brake > 0.5:

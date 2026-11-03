@@ -32,6 +32,9 @@ from .rsu import RoadSideUnit
 
 logger = logging.getLogger(__name__)
 
+# float slack for the sim-time update gate (CARLA timestamps accumulate rounding error)
+_GATE_TOLERANCE_S = 1e-6
+
 
 class V2XNetwork:
     """
@@ -196,7 +199,8 @@ class V2XNetwork:
         # Gate by simulation time when available for deterministic 2 Hz behavior.
         if not force:
             if sim_time is not None and self.last_update_sim_time is not None:
-                if (sim_time - self.last_update_sim_time) < self.update_interval:
+                # tolerance: accumulated 0.05 s steps land at 0.4999.. and would skip ~23% of ticks
+                if (sim_time - self.last_update_sim_time) < self.update_interval - _GATE_TOLERANCE_S:
                     return False
             elif not self.should_update():
                 return False

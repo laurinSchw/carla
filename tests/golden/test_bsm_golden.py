@@ -1,7 +1,6 @@
 """Golden test pinning every field of create_bsm_from_carla() for a fixed mock snapshot.
 
-Pins current behaviour INCLUDING known defects (e.g. S2 yaw rate deg(rad) conversion,
-S8 x/y stored in latitude/longitude). Fixes change this file deliberately.
+Pins current behaviour INCLUDING known defects (e.g. S8 x/y stored in latitude/longitude). Fixes change this file deliberately.
 """
 
 import sys
