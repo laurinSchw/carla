@@ -481,29 +481,33 @@ def _wait_connected():
 
 
 def test_connect_passes_every_setting_to_the_world_config(client, fake_world_class):
-    body = {"carla_host": "10.1.2.3", "carla_port": 2002, "tm_port": 8123, "v2x_enabled": True, "v2x_range": 120.0,
+    body = {"carla_host": "10.1.2.3", "carla_port": 2002, "tm_port": 8123, "v2x_enabled": True, "awareness_range_m": 120.0,
             "v2x_penetration_rate": 0.5, "v2x_update_rate_hz": 4.0, "seed": 7, "drivers_enabled": False,
-            "driver_mix": {"cautious": 1.0, "normal": 0.0, "aggressive": 0.0},
-            "advisory_enabled": True, "advisory_trigger_level": 2}
+            "driver_mix_cautious": 1.0, "driver_mix_normal": 0.0, "driver_mix_aggressive": 0.0,
+            "advisory_enabled": True, "advisory_trigger_level": 2, "rsu_max_count": 3, "session_disconnect_grace_s": 5.0,
+            "observer_public": False, "lidar_max_sensors": 2}
     assert client.post("/admin/connect", json=body, headers=AUTH).status_code == 200
     assert _wait_connected() == "running"
     cfg = fake_world_class["config"]
     assert (cfg.host, cfg.port, cfg.tm_port) == ("10.1.2.3", 2002, 8123)
-    assert (cfg.v2x_range_m, cfg.v2x_penetration_rate, cfg.v2x_update_rate_hz, cfg.seed) == (120.0, 0.5, 4.0, 7)
+    assert (cfg.awareness_range_m, cfg.v2x_penetration_rate, cfg.v2x_update_rate_hz, cfg.seed) == (120.0, 0.5, 4.0, 7)
+    assert (cfg.rsu_max_count, cfg.session_disconnect_grace_s, cfg.observer_public, cfg.lidar.max_sensors) == (3, 5.0, False, 2)
     assert cfg.drivers_enabled is False and cfg.driver_mix.weights() == [1.0, 0.0, 0.0]
     assert cfg.advisory.enabled is True and cfg.advisory.trigger_level == 2
     assert fake_world_class["started"] is True
 
 
-@pytest.mark.parametrize("mix", [
-    '{"normal": NaN}', '{"normal": Infinity}', '{"normal": -1}', '{"cautious": 0, "normal": 0, "aggressive": 0}',
-    '{"normal": "high"}', '{"turbo": 1}',
+@pytest.mark.parametrize("fields", [
+    '"driver_mix_normal": NaN', '"driver_mix_normal": Infinity', '"driver_mix_normal": -1',
+    '"driver_mix_cautious": 0, "driver_mix_normal": 0, "driver_mix_aggressive": 0',
+    '"driver_mix_normal": "high"', '"turbo": 1', '"v2x_range": 80',
 ])
-def test_a_bad_driver_mix_is_rejected_with_422_before_the_running_world_is_touched(client, fake_world_class, mix):
-    """Review finding: NaN passed validation and crashed the spawn half-way (leaked vehicles); a bad mix also stopped the old world."""
-    r = client.post("/admin/connect", content='{"carla_host": "h", "driver_mix": %s}' % mix,
+def test_a_bad_request_is_rejected_with_422_before_the_running_world_is_touched(client, fake_world_class, fields):
+    """NaN passed validation and crashed the spawn half-way (leaked vehicles); a bad mix also stopped the old world;
+    unknown (old-style) field names are refused instead of silently ignored."""
+    r = client.post("/admin/connect", content='{"carla_host": "h", %s}' % fields,
                     headers={**AUTH, "Content-Type": "application/json"})
-    assert r.status_code == 422, (mix, r.status_code, r.text[:200])
+    assert r.status_code == 422, (fields, r.status_code, r.text[:200])
     assert "config" not in fake_world_class                 # no world was even constructed
 
 
