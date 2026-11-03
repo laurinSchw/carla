@@ -24,7 +24,8 @@ Driven by `REFACTOR_HANDOFF.md` (rev 2: plan, defect list S1–S20 / C1–C13 / 
 | 4 LiDAR on request (`src/lidar/`) | done and live-verified. Tick p95 with 3 sessions + 70 actors was 79.6 ms (target 50 ms, not met: CARLA's `world.tick()` dominates on the lab PC) |
 | 7 Recording (`src/recording/`, `POST /admin/runs`) | done in a first version (see `docs/science/recording.md`); frame-scheduled commands / bit-identical repeats are not |
 | Background drivers + V2X advisory (`src/traffic/`) | done; effect size of the advisory not measured |
-| 5 WS hub + roles, 6 new frontend, 8 docs | not started (only the stopgap admin / client pages exist) |
+| 5 WS hub + roles (`/ws`, topics, session tokens, grace D4), 6 new frontend (`/`, `/observer`, `/vehicle`, `/admin`, Three.js LiDAR view), `/api/*` + `/api/lidar/*` routes, `docs/api.md` | ported from the archived branch (tag `archive/refactor-handoff`); not live-verified on CARLA |
+| Fake CARLA (`start_server.py --fake`), headless scenarios (`python -m src.cli run scenarios/crossing.yaml`), JS Node tests (`tests/js`, runner `tests/unit/test_js_modules.py`) | done; same-seed determinism is shown on the fake world only (`docs/science/CHANGELOG.md`) |
 
 Open model items (need decision D5 or a reference dataset): i.i.d. shadowing (S5), the MAC term is a placeholder (S6), no building
 occlusion (S20), CPM generation, ETSI CAM triggering rules, cooperative perception (`enable_bidirectional_sharing` is a stub that
@@ -84,7 +85,7 @@ the admin connects CARLA from `/admin` or `POST /admin/connect`. Run from the re
 
 ## 6. Tests
 From the repo root: `python -m pytest tests -q -m "not carla"` (venv or container). Markers: `carla` (live CARLA), `server` (deployed server, `SERVER_URL`).
-Baseline: 487 passed, 11 skipped, 5 xfailed (host); 9 of those passes come from the untracked `tests/test_lidar_enhanced.py`. The 5 strict xfails are stale by
+Baseline: 591 passed, 13 skipped, 5 xfailed (host, with Node); 9 of those passes come from the untracked `tests/test_lidar_enhanced.py`. `docs/api.md`/`openapi.json` are generated: run `python -m src.server.api_docs` after changing routes (a test fails when stale). The 5 strict xfails are stale by
 design (CSMA drops at N=100; neighbour tests that never call `broadcast_all`). Node-based tests skip without Node (e.g. in the image).
 - `tests/golden/` — pin `DSRCChannel` (seed 42) and `create_bsm_from_carla` in `expected/*.json`; floats compare at 1e-9 relative. Regenerate only on purpose.
 - `tests/v2x/` — channel, messages, infrastructure/DENM links, model fixes, the channel table pinned against `docs/science/model.md`.
@@ -111,7 +112,8 @@ sensors appear; live tests count only their own.
 - V2X-aware driver: the mechanism is verified live; its effect on speeds/collisions is not measured (needs same-seed A/B over several seeds).
 - Drivers: profiles are project defaults, not calibrated; no destination-driven routing (`set_route` / `set_path` exist in the live TM but need a route planner).
 - Recording: gzip links grow with the square of the V2X stations (≈ 6 MB/minute at 25 vehicles + 5 RSUs); runs are owned by root when written by the container.
-- LiDAR: viewer is a 2-D canvas (no Three.js); observer/admin LiDAR pages of Phase 6 do not exist.
+- LiDAR v3 field-mask bits were changed to match the UI decoder without bumping the version: raw LiDAR recorded before 2026-11-03 uses the old bits (new manifests carry `lidar_protocol`). Open: bump to v4?
+- Open decisions: hub vs `/ws/client` behaviour at grace 0; whether `/client/*` should require the session token; which sensors a vehicle may view with `observer_public=false` (now: its own only).
 - Untracked work files of the owner (hidden from `git add <dir>` by `.git/info/exclude`; never commit them without asking): `collector_enhanced.py` (depends on the removed
   collector), `tests/test_lidar_enhanced.py` (tests its own mocks), root stress/accuracy scripts, `STRESS_*`/`LIDAR_*` summaries, `docs/LIDAR_SERVER_IMPLEMENTATION.md` (old LiDAR design).
 

@@ -112,7 +112,8 @@ def test_hub_streams_world_state_to_an_observer_over_the_websocket(env):
     import src.server.app as app_mod
     srv = env()
     srv.submit(srv.spawn_background_traffic, 2).result(5)
-    _wait(lambda: srv.get_world_state())
+    # a state published before the spawn has no stations; wait for one that does
+    assert _wait(lambda: (w := srv.get_world_state()) and len(w.data["stations"]) == 2)
     app_mod.set_persistent_world(srv)
     with TestClient(app_mod.app) as client, client.websocket_connect("/ws") as ws:
         ws.send_json({"op": "subscribe", "topic": "world.state", "max_hz": 5})

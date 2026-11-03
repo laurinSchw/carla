@@ -4,9 +4,9 @@
 
 export class LidarStream {
   constructor(url, { WebSocketImpl = globalThis.WebSocket, setTimeoutImpl = (fn, ms) => setTimeout(fn, ms),
-    clearTimeoutImpl = (h) => clearTimeout(h), onFrame = () => {}, onMessage = () => {}, onClose = () => {}, onStatus = () => {},
+    clearTimeoutImpl = (h) => clearTimeout(h), credentials = () => null, onFrame = () => {}, onMessage = () => {}, onClose = () => {}, onStatus = () => {},
     retryMs = 1000 } = {}) {
-    Object.assign(this, { url, WebSocketImpl, setTimeoutImpl, clearTimeoutImpl, onFrame, onMessage, onClose, onStatus, retryMs });
+    Object.assign(this, { url, WebSocketImpl, setTimeoutImpl, clearTimeoutImpl, credentials, onFrame, onMessage, onClose, onStatus, retryMs });
     this.sock = null;
     this.profile = null;
     this.over = false;               // the sensor is gone: do not reconnect
@@ -27,6 +27,8 @@ export class LidarStream {
     sock.onopen = () => {
       if (this.sock !== sock) return;
       this.onStatus('open');
+      const cred = this.credentials();          // first message; the server refuses non-public viewing without it
+      if (cred) sock.send(JSON.stringify({ op: 'auth', ...cred }));
       if (this.profile) this._sendProfile();
     };
     sock.onmessage = (ev) => {

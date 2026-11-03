@@ -70,3 +70,15 @@ test('close() does not reconnect and ignores late events of the old socket', () 
   old.bin(new ArrayBuffer(4));
   assert.equal(timers.length, 0); assert.equal(events.frames.length, 0);
 });
+
+test('LidarStream sends the auth message first when credentials exist', async () => {
+  const sent = [];
+  class FakeWS { constructor() { FakeWS.last = this; } send(m) { sent.push(m); } close() {} }
+  const s = new LidarStream('ws://x/ws/lidar/1', { WebSocketImpl: FakeWS, credentials: () => ({ admin_token: 't' }) });
+  s.setProfile({ max_points: 100 });
+  s.connect();
+  FakeWS.last.onopen();
+  assert.equal(JSON.parse(sent[0]).op, 'auth');
+  assert.equal(JSON.parse(sent[0]).admin_token, 't');
+  assert.equal(JSON.parse(sent[1]).op, 'profile');
+});

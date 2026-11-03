@@ -34,7 +34,8 @@ export class LidarView {
    * @param {number} [o.maxPoints]
    */
   constructor(container, { sensorId, schema, getOverlays = () => ({}), simRateHz = 20, onState = () => {}, onClose = () => {},
-    canShowTruth = false, maxPoints = MAX_POINTS, highlightId = null } = {}) {
+    canShowTruth = false, maxPoints = MAX_POINTS, highlightId = null, credentials = () => null } = {}) {
+    this.credentials = credentials;
     this.container = container;
     this.sensorId = sensorId;
     this.schema = schema;
@@ -195,6 +196,7 @@ export class LidarView {
   _startStream() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     this.stream = new LidarStream(`${proto}://${location.host}/ws/lidar/${this.sensorId}`, {
+      credentials: this.credentials,
       onFrame: (buf) => this._onRawFrame(buf),
       onMessage: (m) => this._onMessage(m),
       onStatus: (s) => { if (s !== 'open') this._setState(s); },
