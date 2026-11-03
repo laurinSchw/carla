@@ -1167,7 +1167,7 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin, LidarOpsMixin):
     def get_client_lidar_frame(
         self, session_id: str, profile: StreamProfile = StreamProfile(), after_frame: int = -1
     ):
-        """(frame, protocol-v3 bytes) of the newest frame after ``after_frame`` for this session's sensor, or None."""
+        """(frame, protocol-v4 bytes) of the newest frame after ``after_frame`` for this session's sensor, or None."""
         info = self.get_client_lidar_info(session_id)
         if info is None:
             return None

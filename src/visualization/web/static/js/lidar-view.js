@@ -440,7 +440,7 @@ export class LidarView {
     d.frozen = String(this.frozen);
   }
 
-  /** Raw v3 bytes as received plus the V2X frame used for the overlays (labelled with its stream profile). */
+  /** Raw v4 bytes as received plus the V2X frame used for the overlays (labelled with its stream profile). */
   exportFrame() {
     if (!this.lastRaw || !this.latest) return null;
     const F = this.latest.header.frame;
@@ -453,7 +453,7 @@ export class LidarView {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
-    dl(new Blob([this.lastRaw], { type: 'application/octet-stream' }), `lidar_sensor${this.sensorId}_frame_${F}.v3.bin`);
+    dl(new Blob([this.lastRaw], { type: 'application/octet-stream' }), `lidar_sensor${this.sensorId}_frame_${F}.v4.bin`);
     const meta = { lidar_frame: F, v2x_frame_used_for_overlays: this.overlaySnapshot ? this.overlaySnapshot.v2xFrame : null,
       stream_profile: this.streamProfile, note: 'Subsampled for display if stream_profile.subsampled; full resolution comes only from recordings.',
       overlays: this.overlaySnapshot || null };

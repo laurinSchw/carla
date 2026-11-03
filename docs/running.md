@@ -96,7 +96,7 @@ ruff check src tests start_server.py
 * `tests/unit`, `tests/contract`, `tests/v2x`, `tests/golden`: no CARLA, no network. Golden tests pin the channel and BSM
   outputs; regenerate only deliberately with `UPDATE_GOLDEN=1` and describe why in `docs/science/CHANGELOG.md`.
 * `tests/unit/test_js_modules.py` writes fixtures from the Python side (poses and points from `src/lidar/transforms.py`,
-  LiDAR v3 frames from `src/lidar/protocol.py`, `config_schema()`, `lidar_schema()`, `DENMCauseCode`) and runs
+  LiDAR v4 frames from `src/lidar/protocol.py`, `config_schema()`, `lidar_schema()`, `DENMCauseCode`) and runs
   `tests/js/*.test.mjs` under Node with them; it also decodes Python-encoded frames with the browser decoder. Skipped
   without Node (e.g. in the Docker image).
 * `tests/e2e`: headless scenarios and `start_server.py --fake` as subprocesses (HTTP, hub WebSocket, LiDAR). No browser tests.

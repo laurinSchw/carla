@@ -405,7 +405,7 @@ No change to the V2X channel, BSM, threat or driver models (golden files unchang
   `tag=2, object_idx=4, intensity=8, cos_inc=16`. Semantic mask 23 → 43, raycast mask 9 → 17; strides unchanged (21 / 16 bytes),
   header and pose unchanged. The removed legacy canvas decoder was the only consumer of the old bits. **Raw LiDAR recorded earlier uses
   the old bits**; an old raycast frame (mask 9) would decode with the new reader as xyz + object_idx and silently misread intensity as ids.
-  New runs that record LiDAR write `manifest.lidar_protocol = {"version": 3, "field_layout": "xyz=1,tag_u8=2,..."}`; an old run has no such key.
+  New runs that record LiDAR write `manifest.lidar_protocol = {"version": 4, "field_layout": "xyz=1,tag_u8=2,..."}`; an old run has no such key.
 - **Pure-numpy pose transform** `src/lidar/transforms.py` (= `carla.Transform.get_matrix()`; checked against the installed carla module for
   5 poses incl. pitch 90 / roll 90, max deviation < 1e-6). Used by the fake world and the JS fixtures; the server still uses CARLA's own matrix.
 - **`WorldConfig.realtime` is honoured** (it existed but the loop always slept to real time). Default `True`: unchanged behaviour.
@@ -417,3 +417,7 @@ No change to the V2X channel, BSM, threat or driver models (golden files unchang
 - **Run manifests say `fake_carla: true|false`.** The fake world (`src/testing/fake_carla`, `start_server.py --fake`) is a test double;
   its numbers are not results.
 - `/api/runs` no longer reports an OS permission error (e.g. `runs/` owned by root) as `409 restart_required`; it is `503 {"error": "storage"}`.
+
+## LiDAR wire format v4 (2026-11-03, no model change)
+The field-mask bits changed to the web UI's layout, so the protocol version is now **4** (it was briefly "v3" with the new bits). Raw LiDAR
+recorded before this date is v3 with the old layout and is rejected by the v4 readers (Python and JS) rather than misread. No V2X or channel numbers change.

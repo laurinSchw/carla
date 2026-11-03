@@ -6,7 +6,7 @@
         stations.jsonl     one line per V2X update: ground truth of every vehicle / RSU / VRU
         v2x_links.jsonl    one line per transmission attempt: the full LinkResult (channel decision)
         lidar_meta.jsonl   (optional) one line per recorded LiDAR frame
-        lidar/<sensor>/<frame>.bin   (optional) protocol-v3 frames at FULL resolution (never subsampled)
+        lidar/<sensor>/<frame>.bin   (optional) protocol-v4 frames at FULL resolution (never subsampled)
 
 ``v2x_links.jsonl.gz`` is gzip-compressed and COLUMNAR (the first live recording of 25 vehicles was 28 MB in 30 s as one
 JSON object per link): each line is ``{"frame", "sim_time", "rows": [[...], ...]}`` and the column names are in

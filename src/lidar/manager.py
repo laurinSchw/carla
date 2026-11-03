@@ -476,7 +476,7 @@ class LidarManager:
     def get_stream_frame(
         self, sensor_id: int, profile: StreamProfile = StreamProfile(), after_frame: int = -1
     ) -> Optional[Tuple[int, bytes]]:
-        """Newest frame newer than ``after_frame`` that is due for ``profile``, as protocol-v3 bytes.
+        """Newest frame newer than ``after_frame`` that is due for ``profile``, as protocol-v4 bytes.
 
         "Due" means the newest frame whose number is a multiple of ``profile.every_n_frames``, so a viewer polling at an
         unlucky phase still gets every n-th frame. The bytes are produced once per (sensor, frame, profile) and shared by

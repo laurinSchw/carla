@@ -11,7 +11,7 @@ runs/<UTC>_<git sha>_<name>/
                       client_join/leave, spawn_pedestrians, lidar (lifecycle), advisory (slow/restore), driver_setting_failed
   stations.jsonl      one line per V2X update (every 10th frame at 2 Hz): ground truth of every vehicle / RSU / VRU
   v2x_links.jsonl.gz  gzip, columnar: {frame, sim_time, rows: [[...], ...]}; column names in manifest.formats.v2x_links.columns
-  lidar_meta.jsonl, lidar/<sensor>/<frame>.bin     only with record_lidar: protocol-v3 frames at FULL resolution
+  lidar_meta.jsonl, lidar/<sensor>/<frame>.bin     only with record_lidar: protocol-v4 frames at FULL resolution
 ```
 Every record has `frame` and `sim_time` from the CARLA snapshot; wall-clock time exists only in the manifest. Nothing is rounded
 or decimated. Units are in the names (`x_m`, `speed_mps`, `yaw_deg`, `rx_power_dbm`). CARLA axes: x forward, y right, z up, yaw in

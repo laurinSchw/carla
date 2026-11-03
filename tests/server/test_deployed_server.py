@@ -165,7 +165,7 @@ def test_admin_population_roundtrip(live_world):
 
 @pytest.mark.carla
 def test_lidar_websocket_streams_decodable_frames(live_world, record_property):
-    """Join with LiDAR, read /ws/lidar/{session}, decode protocol-v3 frames."""
+    """Join with LiDAR, read /ws/lidar/{session}, decode protocol-v4 frames."""
     sync = pytest.importorskip("websockets.sync.client")
     from src.lidar import protocol
 

@@ -39,14 +39,14 @@ src/server/
                                 /static; shuts the world down on exit
   admin_routes.py               /admin/*: connect (seed, drivers, advisory, ...), status (+timing_ms), sessions, traffic,
                                 pedestrians, stop, runs, v2x/{rsus,vrus,spat,links,hazards}   (token: ADMIN_TOKEN)
-  client_routes.py              /client/{blueprints,join,leave,lidar/...}, WS /ws/client/{id}, WS /ws/lidar/{id} (binary v3)
+  client_routes.py              /client/{blueprints,join,leave,lidar/...}, WS /ws/client/{id}, WS /ws/lidar/{id} (binary v4)
   persistent_world.py           PersistentCARLAServer: connect, tick thread, spawn/despawn, V2X update every 10 frames,
                                 LiDAR, recording, driver profiles, advisory, hazards
   session_manager.py, sim_executor.py, route_utils.py, world_config.py (validated WorldConfig)
 src/v2x/                        dsrc_channel.py (DSRCConfig, DSRCChannel, LinkResult), network.py (V2XNetwork: registries,
                                 inboxes, hazards, link log), safety_messages.py (BSM/CAM/DENM, threat level), messages.py
                                 (MAP/SPAT/VRUAM/CPM data), rsu.py
-src/lidar/                      protocol.py (v3 wire format), config.py, manager.py (lifecycle, budget, profiles), carla_backend.py
+src/lidar/                      protocol.py (v4 wire format), config.py, manager.py (lifecycle, budget, profiles), carla_backend.py
 src/recording/recorder.py       run directory writer + tolerant link reader
 src/traffic/                    drivers.py (seeded profiles → Traffic Manager settings), advisory.py (V2X-assisted slow-down)
 src/visualization/web/          index.html, observer.html, vehicle.html, admin.html (+ static/js ES modules, static/css, static/vendor)
@@ -112,7 +112,7 @@ sensors appear; live tests count only their own.
 - V2X-aware driver: the mechanism is verified live; its effect on speeds/collisions is not measured (needs same-seed A/B over several seeds).
 - Drivers: profiles are project defaults, not calibrated; no destination-driven routing (`set_route` / `set_path` exist in the live TM but need a route planner).
 - Recording: gzip links grow with the square of the V2X stations (≈ 6 MB/minute at 25 vehicles + 5 RSUs); runs are owned by root when written by the container.
-- LiDAR v3 field-mask bits were changed to match the UI decoder without bumping the version: raw LiDAR recorded before 2026-11-03 uses the old bits (new manifests carry `lidar_protocol`). Open: bump to v4?
+- LiDAR wire format is v4 since 2026-11-03; raw LiDAR recorded earlier is v3 (other bit layout) and is rejected by the readers, there is no v3 reader.
 - Open decisions: hub vs `/ws/client` behaviour at grace 0; whether `/client/*` should require the session token; which sensors a vehicle may view with `observer_public=false` (now: its own only).
 - Untracked work files of the owner (hidden from `git add <dir>` by `.git/info/exclude`; never commit them without asking): `collector_enhanced.py` (depends on the removed
   collector), `tests/test_lidar_enhanced.py` (tests its own mocks), root stress/accuracy scripts, `STRESS_*`/`LIDAR_*` summaries, `docs/LIDAR_SERVER_IMPLEMENTATION.md` (old LiDAR design).

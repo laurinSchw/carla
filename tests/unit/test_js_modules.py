@@ -1,7 +1,7 @@
 """Run the Node unit tests of the browser modules (tests/js/*.test.mjs) against fixtures written by the Python side.
 
 Python writes what the JS side must agree with: poses and transformed points from ``src.lidar.transforms`` (itself
-checked against ``carla.Transform``), LiDAR v3 frames from ``src.lidar.protocol``, the JSON schemas the forms are
+checked against ``carla.Transform``), LiDAR v4 frames from ``src.lidar.protocol``, the JSON schemas the forms are
 generated from (``config_schema``, ``lidar_schema``) and the DENM cause codes. So the two languages cannot drift
 apart silently. Skipped without Node (e.g. in the Docker image).
 """

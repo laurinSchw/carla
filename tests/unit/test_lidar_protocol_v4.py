@@ -1,4 +1,4 @@
-"""LiDAR protocol v3: round trip, compression, malformed input (handoff §5.4, defects L2/L8)."""
+"""LiDAR protocol v4: round trip, compression, malformed input (handoff §5.4, defects L2/L8)."""
 
 import struct
 
@@ -99,7 +99,7 @@ def test_header_layout_is_fixed():
     data = protocol.encode(_semantic(1), field_mask=protocol.SEMANTIC_FIELDS, **KW)
     assert protocol.HEADER_SIZE == 96
     assert data[:4] == b"LIDR"
-    assert struct.unpack_from("<H", data, 4)[0] == 3                 # version
+    assert struct.unpack_from("<H", data, 4)[0] == 4                 # version
     assert struct.unpack_from("<H", data, 6)[0] == protocol.FLAG_SENSOR_FRAME
     assert struct.unpack_from("<Q", data, 8)[0] == 1234              # frame
     assert struct.unpack_from("<d", data, 16)[0] == 61.7             # sim_time

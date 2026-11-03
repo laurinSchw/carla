@@ -1,11 +1,11 @@
-// LiDAR binary protocol v3 decoder (mirror of src/lidar/protocol.py - keep in step with it).
+// LiDAR binary protocol v4 decoder (mirror of src/lidar/protocol.py - keep in step with it).
 // Pure ES module, no dependencies: runs in the browser (a Web Worker) and in Node.
 //
-// Header (48 bytes, little-endian): magic 'LIDR', u16 version=3, u16 flags, u64 frame, f64 sim_time,
+// Header (48 bytes, little-endian): magic 'LIDR', u16 version=4, u16 flags, u64 frame, f64 sim_time,
 // f64 wall_time_unix, u32 num_points, u32 ego_actor_id, u32 sensor_id, u16 point_stride_bytes, u16 field_mask;
 // then the sensor pose: 6 x f64 = x, y, z (m), pitch, yaw, roll (deg); then the packed points.
 
-export const VERSION = 3;
+export const VERSION = 4;
 export const HEADER_SIZE = 48;
 export const POSE_SIZE = 48;
 export const PREAMBLE_SIZE = HEADER_SIZE + POSE_SIZE;
@@ -37,7 +37,7 @@ function strideFor(mask) {
 /** Parse the fixed header and pose. Throws ProtocolError on anything malformed. */
 export function parseHeader(buffer) {
   const buf = buffer instanceof ArrayBuffer ? buffer : buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-  if (buf.byteLength < PREAMBLE_SIZE) throw new ProtocolError('buffer shorter than the v3 header');
+  if (buf.byteLength < PREAMBLE_SIZE) throw new ProtocolError('buffer shorter than the v4 header');
   const v = new DataView(buf);
   const magic = String.fromCharCode(v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3));
   if (magic !== 'LIDR') throw new ProtocolError('bad magic');

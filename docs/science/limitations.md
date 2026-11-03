@@ -56,9 +56,8 @@ been validated against measurement data. Status 2026-11-03; if this page disagre
 * Verified live (CHANGELOG, Phase 4): frames decode, reconfigure replaces the sensor, no leaked sensors. Not separately verified:
   the semantic tag table against CARLA 0.9.16 and the attribute ranges in `lidar_schema()`.
 * Streams to viewers are subsampled (seeded, stable per point); recordings never are.
-* **Wire format:** protocol v3; on 2026-11-03 the field bits changed to the web UI's layout (`xyz=1, tag_u8=2, tag_u32=4, object_idx=8,
-  intensity=16, cos_inc=32`) under the same version number. Raw LiDAR recorded before that date uses the old bits (`tag=2, object_idx=4,
-  intensity=8, cos_inc=16`); their manifests have no `lidar_protocol` key. Do not decode them with the current decoder.
+* **Wire format:** protocol v4 (`xyz=1, tag_u8=2, tag_u32=4, object_idx=8, intensity=16, cos_inc=32`). Frames written before 2026-11-03 are v3
+  (older bit layout); readers reject them with "unsupported version 3" instead of decoding them wrongly. There is no v3 reader.
 
 ## The fake world (`src/testing/fake_carla`)
 

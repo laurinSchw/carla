@@ -406,13 +406,13 @@ def test_lidar_schema_lists_valid_attributes_per_sensor_type(client, world):
     schema = client.get("/client/lidar/schema").json()
     names = lambda t: [a["name"] for a in schema["sensor_types"][t]["attributes"]]
     assert "noise_stddev" not in names("ray_cast_semantic") and "noise_stddev" in names("ray_cast")
-    assert "mount.z_m" in names("ray_cast_semantic") and schema["protocol_version"] == 3
+    assert "mount.z_m" in names("ray_cast_semantic") and schema["protocol_version"] == 4
     assert schema["stream_point_buckets"] == [10000, 25000, 50000, "all"]
     tags = {t["id"]: t for t in schema["semantic_tags"]}
     assert tags[14]["name"] == "Car" and tags[12]["name"] == "Pedestrian" and len(tags[1]["color"]) == 3
 
 
-def test_lidar_ws_streams_v3_frames_of_the_ticked_frame_and_counts_viewers(client, world):
+def test_lidar_ws_streams_v4_frames_of_the_ticked_frame_and_counts_viewers(client, world):
     from src.lidar import protocol
     j = _lidar_session(client, world)
     world.tick_lidar(3)

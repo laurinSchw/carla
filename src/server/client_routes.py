@@ -372,7 +372,7 @@ async def delete_lidar(session_id: str):
 async def session_lidar_websocket(websocket: WebSocket, session_id: str, max_points: Optional[int] = None,
                           max_hz: Optional[float] = None, compress: bool = False):
     """
-    Stream LiDAR frames of this session's sensor as binary protocol v3 (``src/lidar/protocol.py``).
+    Stream LiDAR frames of this session's sensor as binary protocol v4 (``src/lidar/protocol.py``).
 
     Query: ``max_points`` (quantised to 10k/25k/50k/all), ``max_hz`` (a divisor of the simulation
     rate), ``compress`` (zlib). Frames are in the SENSOR frame with the sensor pose in the header.

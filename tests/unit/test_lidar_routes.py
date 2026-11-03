@@ -2,7 +2,7 @@
 
 Covers the role rules (admin: any vehicle of this world; vehicle: only its own; observer: read and view only, and only
 while ``observer_public``), that credentials work as headers and as the first WebSocket message, that the published
-owner is the client name (never the session id), and that the binary stream carries protocol-v3 frames of the sensor.
+owner is the client name (never the session id), and that the binary stream carries protocol-v4 frames of the sensor.
 """
 
 import importlib
@@ -66,7 +66,7 @@ def _live_sensor_actors(rec):
 def test_schema_and_sensor_list_are_public_reads(api):
     c, srv, _ = api
     schema = c.get("/api/lidar/schema").json()
-    assert schema["protocol_version"] == 3 and set(schema["sensor_types"]) == {"ray_cast_semantic", "ray_cast"}
+    assert schema["protocol_version"] == 4 and set(schema["sensor_types"]) == {"ray_cast_semantic", "ray_cast"}
     assert schema["limits"]["max_sensors"] == 3 and schema["limits"]["fixed_delta_seconds"] == 0.05
     body = c.get("/api/lidar/sensors").json()
     assert body["sensors"] == [] and body["budget"]["max_sensors"] == 3
@@ -192,7 +192,7 @@ def _text_where(ws, pred, max_msgs=300):
     raise AssertionError("no matching text message")
 
 
-def test_ws_streams_protocol_v3_frames_of_the_sensor(api):
+def test_ws_streams_protocol_v4_frames_of_the_sensor(api):
     c, srv, _ = api
     j, _ = _join(c)
     sensor_id = _sensor(c, srv, j["actor_id"])

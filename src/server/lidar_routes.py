@@ -251,7 +251,7 @@ async def delete_session_sensor(session_id: str, x_admin_token: Optional[str] = 
     return {"released": removed}
 
 
-# ── WebSocket: binary protocol v3 frames + JSON control messages ─────────────────────────────────
+# ── WebSocket: binary protocol v4 frames + JSON control messages ─────────────────────────────────
 
 def parse_profile(msg: Dict[str, Any], sim_hz: float) -> StreamProfile:
     """``{"max_points": int|null, "max_hz": number|null, "compress": bool}`` -> quantised StreamProfile (ValueError if bad)."""
@@ -280,7 +280,7 @@ async def lidar_websocket(websocket: WebSocket, sensor_ref: str, max_points: Opt
 async def sensor_websocket(websocket: WebSocket, sensor_id: int, max_points: Optional[int] = None,
                            max_hz: Optional[float] = None, compress: bool = False) -> None:
     """
-    View one sensor. Binary messages are protocol v3 frames (``src/lidar/protocol.py``); text messages are JSON::
+    View one sensor. Binary messages are protocol v4 frames (``src/lidar/protocol.py``); text messages are JSON::
 
         {"type": "state", "state": "active", "frame": 1234, "error": null}
         {"type": "stream_profile", "max_points": 25000, "max_hz": 10.0, "every_n_frames": 2, "compress": false,

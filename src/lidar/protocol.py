@@ -1,7 +1,7 @@
-"""LiDAR binary protocol v3 (handoff §5.4). Little-endian.
+"""LiDAR binary protocol v4 (handoff §5.4). Little-endian.
 
     Header (48 bytes)  ``<4sHHQddIIIHH``
-        magic b'LIDR' | version=3 | flags | frame | sim_time | wall_time_unix |
+        magic b'LIDR' | version=4 | flags | frame | sim_time | wall_time_unix |
         num_points | ego_actor_id | sensor_id | point_stride_bytes | field_mask
     Pose (48 bytes)    ``<6d``  sensor location x, y, z (m) and rotation pitch, yaw, roll (deg, CARLA order),
                        both in the WORLD frame at the measurement
@@ -36,7 +36,7 @@ from typing import Tuple
 import numpy as np
 
 MAGIC = b"LIDR"
-VERSION = 3
+VERSION = 4
 
 FLAG_ZLIB = 1
 FLAG_WORLD_FRAME = 2
@@ -123,7 +123,7 @@ def encode(
     world_frame: bool = False,
     compress: bool = False,
 ) -> bytes:
-    """Pack ``points`` (a structured array with at least the fields of ``field_mask``) into one v3 frame."""
+    """Pack ``points`` (a structured array with at least the fields of ``field_mask``) into one v4 frame."""
     dtype = point_dtype(field_mask)
     missing = [n for n in dtype.names if n not in (points.dtype.names or ())]
     if missing:
@@ -144,7 +144,7 @@ def encode(
 
 
 def decode(data: bytes) -> Tuple[LidarHeader, np.ndarray]:
-    """Parse one v3 frame into (header, structured point array). Raises ``ProtocolError`` on bad input."""
+    """Parse one v4 frame into (header, structured point array). Raises ``ProtocolError`` on bad input."""
     if len(data) < HEADER_SIZE:
         raise ProtocolError(f"frame too short: {len(data)} < {HEADER_SIZE} bytes")
     (magic, version, flags, frame, sim_time, wall_time, n_points, ego, sensor_id, stride, mask) = _HEADER.unpack_from(data, 0)

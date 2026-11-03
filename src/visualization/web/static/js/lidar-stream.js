@@ -1,4 +1,4 @@
-// Socket of one LiDAR sensor (/ws/lidar/{id}): binary protocol-v3 frames and JSON state messages.
+// Socket of one LiDAR sensor (/ws/lidar/{id}): binary protocol-v4 frames and JSON state messages.
 // Reconnects after an unexpected close, but not once the sensor is destroyed or in error; the stream profile
 // (points / rate / compression) is sent again after every reconnect.
 
