@@ -42,7 +42,7 @@
   }
  ],
  "stats": {
-  "avg_snr_margin_db": 11.833710932002496,
+  "avg_rx_margin_db": 11.833710932002496,
   "prr": 1.0,
   "total_broadcasts": 10.0,
   "total_deliveries": 10.0,

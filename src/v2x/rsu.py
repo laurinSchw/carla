@@ -68,7 +68,7 @@ class RSUConfig:
     intersection_id: int
     position: tuple                       # (x, y, z) CARLA world coordinates
     tx_power_dbm: float = 33.0            # ETSI TR 101 607 RSU max
-    broadcast_range_m: float = 300.0      # Intersection coverage radius (m)
+    broadcast_range_m: float = 300.0      # Informational service-area radius; reception is decided by the channel + awareness range (S4/S13)
     map_revision: int = 1
 
 

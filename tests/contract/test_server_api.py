@@ -61,7 +61,7 @@ def test_openapi_schema_is_served(client):
 
 # --- admin auth ---------------------------------------------------------
 
-ADMIN_GETS = ["/admin/status", "/admin/sessions", "/admin/v2x/rsus", "/admin/v2x/vrus", "/admin/v2x/spat"]
+ADMIN_GETS = ["/admin/status", "/admin/sessions", "/admin/v2x/rsus", "/admin/v2x/vrus", "/admin/v2x/spat", "/admin/v2x/links"]
 
 
 @pytest.mark.parametrize("path", ADMIN_GETS)
@@ -260,3 +260,20 @@ def test_stop_with_world_requests_shutdown(client, world):
             break
         import time; time.sleep(0.05)
     assert world.stopped
+
+
+def test_v2x_links_endpoint_filters_and_summarises(client, world):
+    from src.v2x.dsrc_channel import LinkResult
+
+    def link(msg, delivered, cause=None, rx=1):
+        return LinkResult(1, 0.5, 5, rx, msg, "I2V", 10.0, True, 33.0, 80.0, 0.0, -50.0, 35.0,
+                          1.0, 1.0, 1.0, delivered, cause)
+
+    world.v2x_network = type("Net", (), {"get_link_results": lambda self: [
+        link("SPAT", True), link("MAP", False, "channel_or_mac"), link("SPAT", False, "out_of_awareness_range", rx=2),
+    ]})()
+    body = client.get("/admin/v2x/links", headers=AUTH).json()
+    assert body["summary"] == {"total": 3, "by_outcome": {"delivered": 1, "channel_or_mac": 1, "out_of_awareness_range": 1}}
+    spat = client.get("/admin/v2x/links?msg_type=SPAT&rx_id=2", headers=AUTH).json()
+    assert [l["drop_cause"] for l in spat["links"]] == ["out_of_awareness_range"]
+    assert len(client.get("/admin/v2x/links?limit=1", headers=AUTH).json()["links"]) == 1

@@ -15,9 +15,10 @@ Mount on the main app with::
 import os
 import logging
 import threading
+from dataclasses import asdict
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header, Depends
+from fastapi import APIRouter, HTTPException, Header, Depends, Query
 from pydantic import BaseModel, Field, ValidationError
 
 from src.server.route_utils import on_sim_thread
@@ -309,6 +310,33 @@ async def list_spat():
         }
         for spat in spat_messages.values()
     ]
+
+
+@router.get("/v2x/links", summary="Per-link channel results of the last V2X update",
+            dependencies=[Depends(_require_admin)])
+async def list_links(msg_type: Optional[str] = None, rx_id: Optional[int] = None,
+                     delivered: Optional[bool] = None, limit: int = Query(default=200, ge=1, le=5000)):
+    """One record per (transmitter, receiver, message) attempt, with the full channel decision.
+
+    Filter by ``msg_type`` (BSM, MAP, SPAT, VRUAM), ``rx_id`` and ``delivered``; ``summary`` counts
+    all matching records, ``links`` is truncated to ``limit``.
+    """
+    net = getattr(_world, "v2x_network", None) if _world is not None else None
+    if net is None:
+        return {"summary": {"total": 0}, "links": []}
+    links = [
+        l for l in net.get_link_results()  # list is replaced per update: a safe snapshot
+        if (msg_type is None or l.msg_type == msg_type)
+        and (rx_id is None or l.rx_id == rx_id)
+        and (delivered is None or l.delivered == delivered)
+    ]
+    by_cause: dict = {}
+    for l in links:
+        by_cause[l.drop_cause or "delivered"] = by_cause.get(l.drop_cause or "delivered", 0) + 1
+    return {
+        "summary": {"total": len(links), "by_outcome": by_cause},
+        "links": [asdict(l) for l in links[:limit]],
+    }
 
 
 # ------------------------------------------------------------------ #

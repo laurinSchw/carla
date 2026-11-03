@@ -661,41 +661,42 @@ class PersistentCARLAServer:
         neighbors = self.v2x_network.get_neighbors(vid)
         threats = self.v2x_network.get_threats(vid)
 
-        # Nearby SPAT — RSUs whose broadcast range covers the vehicle
-        spat_nearby = []
-        for iid, rsu in getattr(self.v2x_network, "_rsus", {}).items():
-            rx, ry = rsu.config.position[0], rsu.config.position[1]
-            dist = math.sqrt((vx - rx) ** 2 + (vy - ry) ** 2)
-            if dist <= rsu.config.broadcast_range_m:
-                spat = self.v2x_network.spat_messages.get(iid)
-                if spat is not None:
-                    spat_nearby.append({
-                        "intersection_id": spat.intersection_id,
-                        "distance": round(dist, 1),
-                        "states": [
-                            {
-                                "signal_group_id": s.signal_group_id,
-                                "movement_event": s.movement_event,
-                                "likely_time_s": round(s.likely_time_s, 1)
-                                if s.likely_time_s is not None else None,
-                            }
-                            for s in spat.states
-                        ],
-                    })
+        net = self.v2x_network
 
-        # Nearby VRUAMs — pedestrians / cyclists within 100 m
+        # SPAT / MAP this vehicle actually RECEIVED through the channel (not a radius test)
+        spat_nearby = []
+        for iid, spat in net.spat_inbox.get(vid, {}).items():
+            rsu = net._rsus.get(iid)
+            dist = (
+                math.hypot(vx - rsu.config.position[0], vy - rsu.config.position[1])
+                if rsu is not None else None
+            )
+            spat_nearby.append({
+                "intersection_id": spat.intersection_id,
+                "distance": round(dist, 1) if dist is not None else None,
+                "states": [
+                    {
+                        "signal_group_id": s.signal_group_id,
+                        "movement_event": s.movement_event,
+                        "likely_time_s": round(s.likely_time_s, 1)
+                        if s.likely_time_s is not None else None,
+                    }
+                    for s in spat.states
+                ],
+            })
+        map_received = sorted(net.map_inbox.get(vid, {}))
+
+        # VRUAMs this vehicle actually RECEIVED through the channel
         vru_nearby = []
-        for vruam in getattr(self.v2x_network, "vru_messages", {}).values():
+        for vruam in net.vruam_inbox.get(vid, {}).values():
             px, py = vruam.position[0], vruam.position[1]
-            dist = math.sqrt((vx - px) ** 2 + (vy - py) ** 2)
-            if dist <= 100.0:
-                vru_nearby.append({
-                    "station_id": vruam.station_id,
-                    "profile": vruam.vru_profile.name,
-                    "distance": round(dist, 1),
-                    "speed": round(vruam.speed, 2),
-                    "motion_state": vruam.motion_state,
-                })
+            vru_nearby.append({
+                "station_id": vruam.station_id,
+                "profile": vruam.vru_profile.name,
+                "distance": round(math.hypot(vx - px, vy - py), 1),
+                "speed": round(vruam.speed, 2),
+                "motion_state": vruam.motion_state,
+            })
 
         return {
             "bsm": {
@@ -729,6 +730,7 @@ class PersistentCARLAServer:
                 for t in threats
             ],
             "spat_nearby": spat_nearby,
+            "map_received": map_received,
             "vru_nearby": vru_nearby,
         }
 

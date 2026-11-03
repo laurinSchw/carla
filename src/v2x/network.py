@@ -23,7 +23,9 @@ from .safety_messages import (
     PRIORITY_ROUTINE, PRIORITY_HIGH, PRIORITY_EMERGENCY,
     V2V_RANGE_MEDIUM, SHARE_SENSOR_DATA_DISTANCE
 )
-from .dsrc_channel import DSRCChannel, DSRCConfig
+from dataclasses import replace
+
+from .dsrc_channel import DSRCChannel, DSRCConfig, LinkResult
 from .messages import (
     SPATMessage, MAPMessage,
     VRUAwarenessMessage, VRUProfile,
@@ -50,7 +52,7 @@ class V2XNetwork:
     """
     
     def __init__(self,
-                 max_range: float = V2V_RANGE_MEDIUM,
+                 max_range: Optional[float] = V2V_RANGE_MEDIUM,
                  update_rate_hz: float = 2.0,
                  enable_cooperative_perception: bool = True,
                  world=None,
@@ -59,9 +61,10 @@ class V2XNetwork:
         Initialize enhanced V2V network.
 
         Args:
-            max_range: Application-layer cooperative awareness zone in meters.
-                       Vehicles outside this radius are excluded from neighbor
-                       discovery regardless of physical channel reachability.
+            max_range: Awareness range in metres (application-layer filter applied AFTER the
+                       radio model, to every message type: BSM, SPAT, MAP, VRUAM). A packet the
+                       radio delivered but from beyond this radius is logged as dropped with
+                       cause "out_of_awareness_range". None = no filter, the radio decides.
             update_rate_hz: BSM application update frequency (default 2 Hz per
                             SAE J2735 §7.1 minimum beacon interval).
             enable_cooperative_perception: Enable sensor data sharing.
@@ -69,7 +72,7 @@ class V2XNetwork:
             dsrc_config: DSRCConfig for the IEEE 802.11p channel model. When None,
                          ETSI EN 302 663 Class A OBU defaults are used.
         """
-        self.max_range = max_range
+        self.max_range: Optional[float] = max_range
         self.update_rate_hz = update_rate_hz
         self.update_interval = 1.0 / update_rate_hz  # 0.5 s for 2 Hz
         self.enable_coop_perception = enable_cooperative_perception
@@ -91,6 +94,7 @@ class V2XNetwork:
 
         # Previous speeds for BSM acceleration estimation
         self.prev_speeds: Dict[int, float] = {}
+        self._frame_for_links = -1
 
         # Physics constants cached at registration (get_physics_control is a blocking RPC)
         self._max_steer_deg: Dict[int, Optional[float]] = {}
@@ -135,11 +139,20 @@ class V2XNetwork:
         # Latest VRUAM per VRU station
         self.vru_messages: Dict[int, VRUAwarenessMessage] = {}
 
+        # What each vehicle actually RECEIVED through the channel (rx vehicle -> tx station -> message)
+        self.spat_inbox: Dict[int, Dict[int, SPATMessage]] = {}
+        self.map_inbox: Dict[int, Dict[int, MAPMessage]] = {}
+        self.vruam_inbox: Dict[int, Dict[int, VRUAwarenessMessage]] = {}
+
+        # One LinkResult per transmission attempt of the last update (all message types).
+        # The list is replaced, never mutated, so other threads may read it safely.
+        self.last_links: List[LinkResult] = []
+
 
         logger.info(
-            "V2X network initialized: %.1f Hz, range %.0fm "
+            "V2X network initialized: %.1f Hz, awareness range %s m "
             "[DSRC/WAVE channel: TX=%.0f dBm, n_LOS=%.2f, n_NLOS=%.2f, CBR=%.2f]",
-            update_rate_hz, max_range,
+            update_rate_hz, 'none' if max_range is None else f'{max_range:.0f}',
             self._dsrc_channel.config.tx_power_dbm,
             self._dsrc_channel.config.path_loss_exponent_los,
             self._dsrc_channel.config.path_loss_exponent_nlos,
@@ -248,7 +261,12 @@ class V2XNetwork:
             vid: (bsm.x_m, bsm.y_m)
             for vid, bsm in self.bsm_messages.items()
         }
-        self._dsrc_channel.broadcast_all(self.bsm_messages, positions)
+        self._frame_for_links = getattr(snapshot, "frame", -1)
+        self._dsrc_channel.broadcast_all(
+            self.bsm_messages, positions,
+            frame=self._frame_for_links, sim_time=self.last_update_sim_time or 0.0,
+        )
+        self.last_links = self._apply_awareness_filter(self._dsrc_channel.last_links)
 
         # ── Phase 3: Neighbor discovery using channel-filtered BSM view ───────
         self._discover_neighbors()
@@ -336,7 +354,7 @@ class V2XNetwork:
                 self.distances[(vid2, vid1)] = distance
 
                 # Neighbour only if within zone AND BSM was delivered by channel
-                if distance <= self.max_range and vid2 in received_by_vid1:
+                if self._in_awareness_range(distance) and vid2 in received_by_vid1:
                     self.neighbors[vid1].append(vid2)
     
     def _assess_threats(self):
@@ -549,7 +567,7 @@ class V2XNetwork:
               total_deliveries   — successful packet deliveries
               total_drops        — packets dropped by channel model
               prr                — rolling packet reception rate [0, 1]
-              avg_snr_margin_db  — average SNR margin above sensitivity floor
+              avg_rx_margin_db   — average receive margin (P_rx − sensitivity) in dB
         """
         return self._dsrc_channel.get_stats()
 
@@ -628,6 +646,7 @@ class V2XNetwork:
         sim_time = self._last_sim_time()
         self._update_rsu(sim_time)
         self._update_vru(snapshot, sim_time)
+        self._deliver_infrastructure_messages(getattr(snapshot, "frame", -1), sim_time)
         return True
 
     # ── Internal helpers ───────────────────────────────────────────────────────
@@ -694,6 +713,75 @@ class V2XNetwork:
             motion_state=motion_state,
         )
 
+    # ── V2I / V2P over the channel ─────────────────────────────────────────────
+
+    def _in_awareness_range(self, distance_m: float) -> bool:
+        return self.max_range is None or distance_m <= self.max_range
+
+    def _apply_awareness_filter(self, links: List[LinkResult]) -> List[LinkResult]:
+        """Mark packets the radio delivered but the awareness range discards (new list)."""
+        if self.max_range is None:
+            return list(links)
+        return [
+            replace(l, delivered=False, drop_cause="out_of_awareness_range")
+            if l.delivered and l.distance_m > self.max_range else l
+            for l in links
+        ]
+
+    def _deliver_infrastructure_messages(self, frame: int, sim_time: float) -> None:
+        """Send this tick's MAP, SPAT and VRUAM from every RSU / VRU to every vehicle through
+        the same DSRC channel as BSMs (own TX power for RSUs; VRU devices use the channel default).
+
+        Receivers are the vehicles that have a BSM this tick (their positions are known).
+        Rebuilds the inboxes from scratch, so a vehicle only holds what survived this tick.
+        """
+        channel = self._dsrc_channel
+        vehicle_pos = {vid: (b.x_m, b.y_m) for vid, b in self.bsm_messages.items()}
+        rsu_pos = {iid: (r.config.position[0], r.config.position[1]) for iid, r in self._rsus.items()}
+        vru_pos = {vid: (m.position[0], m.position[1]) for vid, m in self.vru_messages.items()}
+
+        # carrier-sense contention domain: every transmitter, namespaced so ids cannot collide
+        stations = dict(vehicle_pos)
+        stations.update({("rsu", i): p for i, p in rsu_pos.items()})
+        stations.update({("vru", i): p for i, p in vru_pos.items()})
+
+        spat_inbox: Dict[int, Dict[int, SPATMessage]] = {vid: {} for vid in vehicle_pos}
+        map_inbox: Dict[int, Dict[int, MAPMessage]] = {vid: {} for vid in vehicle_pos}
+        vruam_inbox: Dict[int, Dict[int, VRUAwarenessMessage]] = {vid: {} for vid in vehicle_pos}
+        links: List[LinkResult] = []
+
+        def transmit(key, tx_id, tx_xy, tx_power, link_type, messages, inboxes):
+            n_contenders = channel._count_contenders(key, tx_xy, stations)
+            for rx_id, rx_xy in vehicle_pos.items():
+                los_blocked = channel.config.enable_nlos_model and channel._is_nlos(
+                    None, rx_id, tx_xy, rx_xy, vehicle_pos
+                )
+                for msg_type, msg, inbox in zip(("MAP", "SPAT", "VRUAM"), messages, inboxes):
+                    if msg is None:
+                        continue
+                    link = channel.evaluate_link(
+                        tx_id, rx_id, tx_xy, rx_xy, los_blocked, n_contenders,
+                        msg_type=msg_type, link_type=link_type, tx_power_dbm=tx_power,
+                        frame=frame, sim_time=sim_time,
+                    )
+                    if link.delivered and not self._in_awareness_range(link.distance_m):
+                        link = replace(link, delivered=False, drop_cause="out_of_awareness_range")
+                    links.append(link)
+                    if link.delivered:
+                        inbox[rx_id][tx_id] = msg
+
+        for iid, xy in rsu_pos.items():
+            transmit(("rsu", iid), iid, xy, self._rsus[iid].config.tx_power_dbm, "I2V",
+                     (self.map_messages.get(iid), self.spat_messages.get(iid), None),
+                     (map_inbox, spat_inbox, vruam_inbox))
+        for vid, xy in vru_pos.items():
+            transmit(("vru", vid), vid, xy, None, "P2V",
+                     (None, None, self.vru_messages.get(vid)),
+                     (map_inbox, spat_inbox, vruam_inbox))
+
+        self.map_inbox, self.spat_inbox, self.vruam_inbox = map_inbox, spat_inbox, vruam_inbox
+        self.last_links = self.last_links + links
+
     # ── Public accessors ───────────────────────────────────────────────────────
 
     def get_spat(self, intersection_id: int) -> Optional[SPATMessage]:
@@ -711,6 +799,10 @@ class V2XNetwork:
     def get_all_vruam(self) -> Dict[int, VRUAwarenessMessage]:
         """Return all current VRUAM messages keyed by station ID."""
         return self.vru_messages.copy()
+
+    def get_link_results(self) -> List[LinkResult]:
+        """All LinkResult records of the last update (BSM, MAP, SPAT, VRUAM)."""
+        return self.last_links
 
     def get_v2x_summary(self) -> dict:
         """V2X statistics summary (extends V2V network stats)."""

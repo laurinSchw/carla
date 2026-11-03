@@ -175,3 +175,25 @@ actor id (stable between runs), no arbitrary cap. **Not yet verified on live CAR
 ### D6 — ER model
 Decision: no database; the run directory (handoff §5.6) is the schema. `docs/ER_DATABASE_MODEL.md` carries a
 status note; the diagram is regenerated when Phase 7 lands.
+
+### S4 / S13 / LinkResult — every message type goes through the same channel
+Before, only BSMs used `DSRCChannel`. SPAT "reception" was `dist <= 300 m` (RSU) and VRUAM `dist <= 100 m`
+(hard-coded in `persistent_world.py`); `RSUConfig.tx_power_dbm` (33 dBm) was never used.
+Now `DSRCChannel.evaluate_link()` decides every attempt (BSM, MAP, SPAT, VRUAM) and returns a frozen
+`LinkResult` (frame, sim_time, tx/rx id, msg_type, link_type V2V|I2V|P2V, distance, LOS, TX power, path loss,
+shadowing, rx power, rx margin, p_channel, p_mac, p_total, delivered, drop_cause). RSUs transmit with their own
+`tx_power_dbm`; VRU devices use the channel default (23 dBm, project-defined, unverified).
+`V2XNetwork` keeps per-vehicle inboxes (`spat_inbox`, `map_inbox`, `vruam_inbox`) — what a vehicle received, not
+ground truth — and `get_link_results()`; admin `GET /admin/v2x/links?msg_type=&rx_id=&delivered=&limit=`.
+- **S13:** `max_range` is now explicitly the *awareness range*: one application filter applied after the radio to
+  all message types (`None` = radio decides). A packet the radio delivered but from beyond it is logged
+  `delivered=False, drop_cause="out_of_awareness_range"`. The RSU 300 m and VRU 100 m cut-offs are gone
+  (`RSUConfig.broadcast_range_m` is informational). With the server default 75 m an RSU's SPAT is therefore received
+  within 75 m of its position (was 300 m), VRUAMs within 75 m (was 100 m).
+- **BSM path is bit-identical** (golden delivery matrices unchanged). Only change: stats key
+  `avg_snr_margin_db` → `avg_rx_margin_db` (values identical) — the quantity is `P_rx − sensitivity`, not an SNR.
+- **Cost:** with `record_links=True` (default) one record per (tx, rx, message) is kept per update (N·(N−1) BSM records);
+  set `DSRCConfig.record_links=False` for very large runs.
+- **RNG:** V2I/V2P draws come after the BSM draws of the same update, so runs that have RSUs or VRUs consume the
+  seeded stream differently from before; runs without them are unchanged.
+- Drop causes: one Bernoulli draw decides `p_channel · p_mac`, so a radio drop is `"channel_or_mac"` (not separable).

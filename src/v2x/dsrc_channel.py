@@ -30,7 +30,7 @@ Physical model references:
 
 import math
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Tuple
 import random
 
@@ -53,6 +53,38 @@ _L0_DB = 20.0 * math.log10(4.0 * math.pi * _REFERENCE_DIST_M / _DSRC_LAMBDA)
 
 # Carrier sensing range for CSMA/CA contention counting (IEEE 802.11 CS threshold)
 _CARRIER_SENSE_RANGE_M = 300.0
+
+
+@dataclass(frozen=True, slots=True)
+class LinkResult:
+    """Outcome of one (transmitter, receiver, message) attempt through the channel.
+
+    ``p_channel`` is the logistic reception probability of the received power over the
+    sensitivity floor; ``p_mac`` is the EXPERIMENTAL contention term; ``p_total`` is their
+    product and the probability of the single Bernoulli draw that decides the radio outcome.
+    The two causes of a radio drop cannot be told apart after one combined draw, so it is
+    labelled ``"channel_or_mac"``. ``delivered`` means "reached the receiver's application":
+    when the radio delivered the packet but the network's awareness-range filter discards it,
+    the network rewrites the record to ``delivered=False, drop_cause="out_of_awareness_range"``.
+    """
+    frame: int
+    sim_time: float
+    tx_id: int
+    rx_id: int
+    msg_type: str        # "BSM" | "SPAT" | "MAP" | "VRUAM" (| "DENM" | "CPM" when generated)
+    link_type: str       # "V2V" | "I2V" | "P2V"
+    distance_m: float
+    los: bool
+    tx_power_dbm: float
+    path_loss_db: float
+    shadowing_db: float
+    rx_power_dbm: float
+    rx_margin_db: float  # rx_power_dbm - rx_sensitivity_dbm (not an SNR: no noise floor, no interference)
+    p_channel: float
+    p_mac: float
+    p_total: float
+    delivered: bool
+    drop_cause: Optional[str] = None
 
 
 @dataclass
@@ -110,6 +142,11 @@ class DSRCConfig:
     # ── Reproducibility ───────────────────────────────────────────────────────
     random_seed: int = 42
 
+    # ── Observability ─────────────────────────────────────────────────────────
+    # Keep one LinkResult per attempt of the last tick in DSRCChannel.last_links.
+    # N stations create N*(N-1) records per tick: switch off for very large runs.
+    record_links: bool = True
+
 
 class DSRCChannel:
     """
@@ -149,9 +186,12 @@ class DSRCChannel:
             "total_deliveries": 0.0,
             "total_drops": 0.0,
             "prr": 1.0,
-            "avg_snr_margin_db": 0.0,
+            "avg_rx_margin_db": 0.0,
         }
-        self._snr_ring: List[float] = []  # rolling SNR margin samples (capped at 500)
+        self._rx_margin_ring: List[float] = []  # rolling rx-margin samples (capped at 500)
+
+        # LinkResult per attempt of the last broadcast_all() tick (+ anything appended by the network)
+        self.last_links: List[LinkResult] = []
 
         logger.debug(
             "DSRCChannel initialized: TX=%.0f dBm, sensitivity=%.0f dBm, "
@@ -169,6 +209,8 @@ class DSRCChannel:
         self,
         bsm_messages: Dict[int, BSMCore],
         positions: Dict[int, Tuple[float, float]],
+        frame: int = 0,
+        sim_time: float = 0.0,
     ) -> None:
         """
         Compute channel delivery for every (sender, receiver) pair this tick.
@@ -178,10 +220,12 @@ class DSRCChannel:
             positions: {vehicle_id: (x_m, y_m)} in CARLA world space.
                        Typically derived from bsm.x_m / bsm.y_m (CARLA metres),
                        which store CARLA world coordinates (not geodetic).
+            frame, sim_time: stamped on the LinkResult records only.
 
-        Call once per V2V update tick. Results are stable until the next call.
+        Call once per V2X update tick. Results are stable until the next call.
         """
         self._received = {vid: {} for vid in bsm_messages}
+        self.last_links = []
         vehicle_ids = list(bsm_messages.keys())
 
         for sender_id, bsm in bsm_messages.items():
@@ -199,29 +243,71 @@ class DSRCChannel:
                 if rx_pos is None:
                     continue
 
-                distance = _euclidean(tx_pos, rx_pos)
-
-                # Vehicles at the same location: deterministic delivery
-                if distance < 0.5:
-                    self._received[receiver_id][sender_id] = bsm
-                    self.stats["total_broadcasts"] += 1
-                    self.stats["total_deliveries"] += 1
-                    continue
-
                 nlos = (
                     self.config.enable_nlos_model
+                    and _euclidean(tx_pos, rx_pos) >= 0.5
                     and self._is_nlos(sender_id, receiver_id, tx_pos, rx_pos, positions)
                 )
-                prr = self._compute_prr(distance, nlos, n_contenders)
-
-                self.stats["total_broadcasts"] += 1
-                if self._rng.random() < prr:
+                link = self.evaluate_link(
+                    sender_id, receiver_id, tx_pos, rx_pos, nlos, n_contenders,
+                    msg_type="BSM", link_type="V2V", frame=frame, sim_time=sim_time,
+                )
+                if link.delivered:
                     self._received[receiver_id][sender_id] = bsm
-                    self.stats["total_deliveries"] += 1
-                else:
-                    self.stats["total_drops"] += 1
 
         self._flush_stats()
+
+    def evaluate_link(
+        self,
+        tx_id: int,
+        rx_id: int,
+        tx_pos: Tuple[float, float],
+        rx_pos: Tuple[float, float],
+        nlos: bool,
+        n_contenders: int,
+        msg_type: str = "BSM",
+        link_type: str = "V2V",
+        tx_power_dbm: Optional[float] = None,
+        frame: int = 0,
+        sim_time: float = 0.0,
+    ) -> LinkResult:
+        """Decide one transmission attempt and update the channel statistics.
+
+        Every message type (BSM, SPAT, MAP, VRUAM) uses this one path. ``tx_power_dbm`` is the
+        transmitter's own power (OBU, RSU, VRU device); None means ``config.tx_power_dbm``.
+        Consumes the seeded RNG in a fixed order (one Gaussian, then one uniform draw).
+        """
+        cfg = self.config
+        tx_power = cfg.tx_power_dbm if tx_power_dbm is None else tx_power_dbm
+        distance = _euclidean(tx_pos, rx_pos)
+        self.stats["total_broadcasts"] += 1
+
+        if distance < 0.5:
+            # Co-located stations: deterministic delivery, no radio draw
+            self.stats["total_deliveries"] += 1
+            link = LinkResult(
+                frame, sim_time, tx_id, rx_id, msg_type, link_type, distance, True, tx_power,
+                0.0, 0.0, tx_power + 2.0 * cfg.antenna_gain_dbi,
+                tx_power + 2.0 * cfg.antenna_gain_dbi - cfg.rx_sensitivity_dbm,
+                1.0, 1.0, 1.0, True, None,
+            )
+        else:
+            p_rx, path_loss, shadowing = self._rx_power_parts(distance, nlos, tx_power)
+            margin = p_rx - cfg.rx_sensitivity_dbm
+            self._record_margin(margin)
+            p_channel = 1.0 / (1.0 + math.exp(-cfg.prr_sigmoid_k * margin))
+            p_mac = self._csma_success_prob(n_contenders)
+            p_total = p_channel * p_mac
+            delivered = self._rng.random() < p_total
+            self.stats["total_deliveries" if delivered else "total_drops"] += 1
+            link = LinkResult(
+                frame, sim_time, tx_id, rx_id, msg_type, link_type, distance, not nlos, tx_power,
+                path_loss, shadowing, p_rx, margin, p_channel, p_mac, p_total, delivered,
+                None if delivered else "channel_or_mac",
+            )
+        if cfg.record_links:
+            self.last_links.append(link)
+        return link
 
     def get_received(self, receiver_id: int) -> Dict[int, BSMCore]:
         """
@@ -243,14 +329,20 @@ class DSRCChannel:
     # ── Channel physics ─────────────────────────────────────────────────────────
 
     def _received_power_dbm(self, distance_m: float, nlos: bool) -> float:
+        """Received signal power in dBm (one shadowing draw); see ``_rx_power_parts``."""
+        return self._rx_power_parts(distance_m, nlos)[0]
+
+    def _rx_power_parts(
+        self, distance_m: float, nlos: bool, tx_power_dbm: Optional[float] = None
+    ) -> Tuple[float, float, float]:
         """
-        Received signal power using log-distance path loss + log-normal shadowing.
+        Received power using log-distance path loss + log-normal shadowing.
 
             P_rx = P_tx + 2·G_ant − [L0 + 10·n·log10(d/d0) + X_σ]
 
-        where X_σ ~ N(0, σ²) is the shadowing term.
-
-        Parameters follow ETSI EN 302 663 / Paier et al. 2008.
+        where X_σ ~ N(0, σ²) is drawn i.i.d. per call (no spatial or temporal correlation).
+        Returns ``(p_rx_dbm, path_loss_db, shadowing_db)``. The exponents and σ are project
+        defaults, not a fit to a cited dataset (see docs/science/model.md).
         """
         cfg = self.config
         n = cfg.path_loss_exponent_nlos if nlos else cfg.path_loss_exponent_los
@@ -260,37 +352,33 @@ class DSRCChannel:
         shadowing = self._rng.gauss(0.0, sigma)
 
         # Both TX and RX carry the same omnidirectional antenna
-        system_gain = cfg.tx_power_dbm + 2.0 * cfg.antenna_gain_dbi
-        return system_gain - path_loss - shadowing
+        tx_power = cfg.tx_power_dbm if tx_power_dbm is None else tx_power_dbm
+        system_gain = tx_power + 2.0 * cfg.antenna_gain_dbi
+        return system_gain - path_loss - shadowing, path_loss, shadowing
 
     def _compute_prr(
         self, distance_m: float, nlos: bool, n_contenders: int
     ) -> float:
         """
-        Packet Reception Rate = P_channel × P_no_contention.
+        Packet reception probability = P_channel × P_mac for one fresh shadowing draw.
 
-        P_channel: logistic function of SNR margin over the sensitivity floor.
-          Calibrated against Sommer et al. (2011) Figure 3:
-            PRR ≈ 1 for SNR margin >> 0 dB
-            PRR ≈ 0.5 exactly at the sensitivity threshold (margin = 0 dB)
-            PRR ≈ 0 for SNR margin << 0 dB
-
-        P_no_contention: Bianchi (2000) CSMA/CA model — probability that no
-          other station transmits during this packet's transmission slot.
+        P_channel: logistic function of the receive margin (P_rx − sensitivity), steepness
+          ``prr_sigmoid_k``; 0.5 exactly at the sensitivity floor. The shape is a project
+          choice; Sommer et al. (2011) is NOT verified as its source (docs/science/model.md).
+        P_mac: ``_csma_success_prob`` — EXPERIMENTAL, uncalibrated.
         """
         p_rx = self._received_power_dbm(distance_m, nlos)
-        snr_margin = p_rx - self.config.rx_sensitivity_dbm
+        margin = p_rx - self.config.rx_sensitivity_dbm
+        self._record_margin(margin)
 
-        # Record for stats (avoid unbounded growth)
-        self._snr_ring.append(snr_margin)
-        if len(self._snr_ring) > 500:
-            self._snr_ring = self._snr_ring[-500:]
+        p_channel = 1.0 / (1.0 + math.exp(-self.config.prr_sigmoid_k * margin))
+        return p_channel * self._csma_success_prob(n_contenders)
 
-        k = self.config.prr_sigmoid_k
-        p_channel = 1.0 / (1.0 + math.exp(-k * snr_margin))
-
-        p_csma = self._csma_success_prob(n_contenders)
-        return p_channel * p_csma
+    def _record_margin(self, margin_db: float) -> None:
+        """Keep the last 500 receive margins for the rolling average (bounded memory)."""
+        self._rx_margin_ring.append(margin_db)
+        if len(self._rx_margin_ring) > 500:
+            self._rx_margin_ring = self._rx_margin_ring[-500:]
 
     def _csma_success_prob(self, n_contenders: int) -> float:
         """
@@ -378,9 +466,9 @@ class DSRCChannel:
         total = self.stats["total_broadcasts"]
         if total > 0:
             self.stats["prr"] = self.stats["total_deliveries"] / total
-        if self._snr_ring:
-            self.stats["avg_snr_margin_db"] = (
-                sum(self._snr_ring) / len(self._snr_ring)
+        if self._rx_margin_ring:
+            self.stats["avg_rx_margin_db"] = (
+                sum(self._rx_margin_ring) / len(self._rx_margin_ring)
             )
 
 
