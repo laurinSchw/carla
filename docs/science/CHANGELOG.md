@@ -352,3 +352,10 @@ Details and file formats: `docs/science/recording.md`.
 - **Bug found by the new tests and fixed:** `V2XNetwork.last_links` listed every MAP / SPAT / VRUAM attempt **twice** (the channel's list was aliased and the infrastructure
   links were added again). Run recordings made before this commit double-count infrastructure links (live check: 14 750 MAP records where 5 RSUs × 25 vehicles × 59 updates
   give 7 375). BSM links were correct. The earlier tests used `next(...)` and set comparisons and did not see it; a regression test now asserts every attempt appears once.
+- **Live check of the hazard flow** (CARLA 0.9.16, 25 vehicles, normal drivers, hazard 50 m ahead of a moving vehicle, relevance 120 m): 9 vehicles were slowed by the
+  warning, the first 0.15 s after publishing; 1 250 DENM link records, all I2V at 33 dBm. Reception by distance: 0–50 m 85.8 % delivered; 50–100 m 62.2 % (24.9 % filtered by
+  the 75 m awareness range); beyond 100 m 0 % (86 % awareness-filtered). Two consequences: (1) **a DENM is now filtered by its own relevance distance**, not by the global
+  75 m BSM awareness range (the old rule made a 120 m warning useless beyond 75 m); (2) the ≈ 14 % loss even within 50 m is the **experimental MAC term**
+  (`exp(−0.005·(N−1))` = 0.865 at 30 stations), not radio physics — until that term is calibrated (open item S6/D5), packet-loss conclusions are about the placeholder.
+  The effect on speeds is NOT established: with no control run, mean speed fell everywhere after the publish time (within 100 m: 12.0 → 9.8 km/h, farther away 16.3 → 10.5 km/h).
+  A same-seed A/B (advisory on/off) with several seeds is needed before claiming an effect size.

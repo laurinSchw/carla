@@ -197,13 +197,20 @@ def test_a_hazard_far_beyond_the_radio_range_is_lost_by_the_radio_not_delivered(
     assert not link.delivered and link.drop_cause == "channel_or_mac" and net.denm_inbox[1] == {}
 
 
-def test_a_hazard_outside_the_awareness_range_is_logged_as_filtered():
+def test_a_hazard_is_filtered_by_its_own_relevance_distance_not_by_the_global_awareness_range():
+    """Live finding: with the 75 m BSM awareness range a 120 m warning was never received beyond 75 m."""
     net, snap = _world(max_range=10.0, rsu_xy=(500.0, 500.0), vehicle_x=(60.0,))
     net.update(snap, force=True)
-    net.publish_hazard((0.0, 0.0, 0.0))
+    net.publish_hazard((0.0, 0.0, 0.0), relevance_distance_m=120.0)            # vehicle is 60 m away: inside the DENM's area
     net.update(_Snapshot(snap._snaps, t=1.5), force=True)
     (link,) = [l for l in net.get_link_results() if l.msg_type == "DENM"]
-    assert link.drop_cause == "out_of_awareness_range" and net.denm_inbox[1] == {}
+    assert link.delivered and (net.denm_inbox[1] or None)
+    far, fsnap = _world(max_range=500.0, rsu_xy=(500.0, 500.0), vehicle_x=(60.0,))
+    far.update(fsnap, force=True)
+    far.publish_hazard((0.0, 0.0, 0.0), relevance_distance_m=30.0)             # vehicle is outside the warning's own area
+    far.update(_Snapshot(fsnap._snaps, t=1.5), force=True)
+    (link,) = [l for l in far.get_link_results() if l.msg_type == "DENM"]
+    assert link.drop_cause == "out_of_awareness_range" and far.denm_inbox[1] == {}
 
 
 def test_hazards_expire_after_their_validity_and_cancel_removes_them_at_once():

@@ -835,8 +835,14 @@ class V2XNetwork:
             if isinstance(key, tuple):
                 stations[key] = xy
 
-        def transmit(key, tx_id, tx_xy, tx_power, link_type, items, exclude_rx=None):
-            """items: (msg_type, message, inbox dict, key under which a receiver stores it)."""
+        def transmit(key, tx_id, tx_xy, tx_power, link_type, items, exclude_rx=None, awareness_m="default"):
+            """items: (msg_type, message, inbox dict, key under which a receiver stores it).
+
+            ``awareness_m`` overrides the network's awareness range for this transmission (a DENM is filtered by its own
+            relevance distance, not by the BSM-oriented global range).
+            """
+            if awareness_m == "default":
+                awareness_m = self.max_range
             n_contenders = channel._count_contenders(key, tx_xy, stations)
             nlos_by_rx = (
                 channel.nlos_to_receivers(exclude_rx, tx_xy, vehicle_pos) if channel.config.enable_nlos_model else {}
@@ -851,7 +857,7 @@ class V2XNetwork:
                     link = channel.evaluate_link(
                         tx_id, rx_id, tx_xy, rx_xy, los_blocked, n_contenders,
                         msg_type=msg_type, link_type=link_type, tx_power_dbm=tx_power,
-                        frame=frame, sim_time=sim_time, awareness_range_m=self.max_range,
+                        frame=frame, sim_time=sim_time, awareness_range_m=awareness_m,
                     )
                     links.append(link)
                     if link.delivered:
@@ -866,7 +872,7 @@ class V2XNetwork:
         for key, tx_id, xy, power, link_type, denm in denm_sources:
             transmit(key, tx_id, xy, power, link_type,
                      (("DENM", denm, denm_inbox, (denm.station_id, denm.action_id)),),
-                     exclude_rx=tx_id if link_type == "V2V" else None)
+                     exclude_rx=tx_id if link_type == "V2V" else None, awareness_m=denm.relevance_distance)
 
         self.map_inbox, self.spat_inbox, self.vruam_inbox = map_inbox, spat_inbox, vruam_inbox
         self.denm_inbox = denm_inbox
