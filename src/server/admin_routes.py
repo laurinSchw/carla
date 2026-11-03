@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Header, Depends, Query
 from pydantic import BaseModel, Field, ValidationError
 
 from src.recording.recorder import RunAlreadyRecording
-from src.server.route_utils import on_sim_thread
+from src.server.route_utils import ConflictError, on_sim_thread
 from src.server.world_config import WorldConfig
 from src.traffic.advisory import AdvisoryConfig
 from src.traffic.drivers import DriverMix
@@ -362,6 +362,44 @@ async def list_runs_endpoint():
     if _world is None:
         return {"current": None, "runs": []}
     return _world.get_run_status()
+
+
+class HazardRequest(BaseModel):
+    x: float = Field(description="CARLA world x of the hazard (metres)")
+    y: float = Field(description="CARLA world y of the hazard (metres)")
+    z: float = 0.0
+    cause_code: int = Field(default=10, ge=0, le=255, description="ETSI cause code; 10 = obstacle on road, 2 = accident, 3 = road works")
+    duration_s: float = Field(default=30.0, gt=0, le=3600, description="Simulation seconds the warning stays valid")
+    relevance_distance_m: float = Field(default=150.0, gt=0, le=2000)
+    tx_power_dbm: Optional[float] = Field(default=None, ge=0, le=46, description="Default 33 dBm (roadside unit)")
+
+
+@router.post("/v2x/hazards", status_code=201, summary="Place a hazard warning (DENM)", dependencies=[Depends(_require_admin)])
+async def publish_hazard(req: HazardRequest):
+    """The warning is sent through the DSRC channel every V2X update; a vehicle only reacts if it RECEIVED it
+    (see ``GET /admin/v2x/links?msg_type=DENM``). Needs V2X enabled."""
+    _assert_ready()
+    _assert_running()
+    try:
+        return await on_sim_thread(_world, _world.publish_hazard, req.x, req.y, req.z, req.cause_code, req.duration_s,
+                                   req.relevance_distance_m, req.tx_power_dbm)
+    except ValueError as exc:  # unknown cause code
+        raise HTTPException(status_code=422, detail=str(exc))
+    except ConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.get("/v2x/hazards", summary="Active hazard warnings", dependencies=[Depends(_require_admin)])
+async def list_hazards():
+    return _world.get_hazards() if _world is not None else []
+
+
+@router.delete("/v2x/hazards/{station_id}", summary="Cancel a hazard warning", dependencies=[Depends(_require_admin)])
+async def clear_hazard(station_id: int):
+    _assert_ready()
+    if not await on_sim_thread(_world, _world.clear_hazard, station_id):
+        raise HTTPException(status_code=404, detail="no such hazard")
+    return {"cleared": station_id}
 
 
 @router.get("/v2x/links", summary="Per-link channel results of the last V2X update",

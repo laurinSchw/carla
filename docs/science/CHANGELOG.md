@@ -340,3 +340,15 @@ Details and file formats: `docs/science/recording.md`.
   Not bit-identical (real-time-paced commands, traffic-light phase, CARLA float behaviour).
 - **Static checks:** `ruff` (F, E9, B): no undefined names or syntax errors; unused imports removed. Coverage of `src` by the offline tests: 91 %.
   Known stub: `V2XNetwork.enable_bidirectional_sharing` accepts sensor data and shares nothing (cooperative perception and CPM generation are not implemented).
+
+## V2X-aware driver: hazard warnings (DENM) through the channel (2026-11-03)
+- **Hazard warnings:** `POST /admin/v2x/hazards {x, y, cause_code, duration_s, relevance_distance_m}` places a hazard (an admin acts as a roadside unit at the
+  event, 33 dBm default, unverified); `GET`/`DELETE /admin/v2x/hazards`. Every active DENM is now transmitted every V2X update through the same DSRC channel as
+  all other messages (`msg_type = "DENM"`, `link_type` I2V for hazards, V2V for a vehicle's own DENM; full `LinkResult` per receiver in the run's links file) and
+  lands in each receiver's `denm_inbox`. `DENM.validity_duration` (new, None = never expires, so existing users are unaffected) makes warnings expire.
+- **Advisory reaction** (`advisory_enabled`): a vehicle slows by `hazard_slowdown_pct` (60 %) only if it RECEIVED a relevant warning (within the DENM's relevance distance
+  and moving towards the event) and keeps it `hold_s` after the warning stops arriving; a threat slow-down (40 %) from received BSMs still works, an episode keeps its
+  strongest amount. Events `hazard_publish`, `hazard_clear`, `advisory` (with `hazard_received`) go to the run's `events.jsonl`.
+- **Bug found by the new tests and fixed:** `V2XNetwork.last_links` listed every MAP / SPAT / VRUAM attempt **twice** (the channel's list was aliased and the infrastructure
+  links were added again). Run recordings made before this commit double-count infrastructure links (live check: 14 750 MAP records where 5 RSUs × 25 vehicles × 59 updates
+  give 7 375). BSM links were correct. The earlier tests used `next(...)` and set comparisons and did not see it; a regression test now asserts every attempt appears once.

@@ -167,3 +167,107 @@ def test_infrastructure_sender_with_a_colliding_id_does_not_exclude_a_vehicle_bl
     vehicles = {1: (50.0, 0.0), 2: (25.0, 0.0), 3: (100.0, 0.0)}   # vehicle 2 sits exactly between RSU "1" and vehicle 3
     fast = ch.nlos_to_receivers(None, (0.0, 0.0), vehicles)
     assert fast[3] is True and fast[2] is False
+
+
+# ── hazard warnings (DENM) through the channel ───────────────────────────────
+
+from src.v2x.network import HAZARD_STATION_BASE  # noqa: E402
+from src.v2x.safety_messages import DENM, DENMCauseCode  # noqa: E402
+
+
+def test_an_admin_hazard_is_sent_through_the_channel_and_lands_in_the_inbox_of_vehicles_that_received_it():
+    net, snap = _world(rsu_xy=(500.0, 500.0), vehicle_x=(20.0, 80.0))
+    net.update(snap, force=True)                                           # establishes sim time
+    hz = net.publish_hazard((50.0, 0.0, 0.0), DENMCauseCode.ACCIDENT, duration_s=30.0, relevance_distance_m=120.0)
+    assert hz.station_id >= HAZARD_STATION_BASE and net.get_hazards() == [hz]
+    net.update(_Snapshot(snap._snaps, t=1.5), force=True)
+    links = [l for l in net.get_link_results() if l.msg_type == "DENM"]
+    assert {(l.link_type, l.tx_id) for l in links} == {("I2V", hz.station_id)} and {l.rx_id for l in links} == {1, 2}
+    assert all(l.tx_power_dbm == 33.0 for l in links)
+    for rx in (1, 2):
+        assert (hz.station_id, 0) in net.denm_inbox[rx]
+
+
+def test_a_hazard_far_beyond_the_radio_range_is_lost_by_the_radio_not_delivered():
+    net, snap = _world(rsu_xy=(500.0, 500.0), vehicle_x=(20_000.0,))
+    net.update(snap, force=True)
+    net.publish_hazard((0.0, 0.0, 0.0))
+    net.update(_Snapshot(snap._snaps, t=1.5), force=True)
+    (link,) = [l for l in net.get_link_results() if l.msg_type == "DENM"]
+    assert not link.delivered and link.drop_cause == "channel_or_mac" and net.denm_inbox[1] == {}
+
+
+def test_a_hazard_outside_the_awareness_range_is_logged_as_filtered():
+    net, snap = _world(max_range=10.0, rsu_xy=(500.0, 500.0), vehicle_x=(60.0,))
+    net.update(snap, force=True)
+    net.publish_hazard((0.0, 0.0, 0.0))
+    net.update(_Snapshot(snap._snaps, t=1.5), force=True)
+    (link,) = [l for l in net.get_link_results() if l.msg_type == "DENM"]
+    assert link.drop_cause == "out_of_awareness_range" and net.denm_inbox[1] == {}
+
+
+def test_hazards_expire_after_their_validity_and_cancel_removes_them_at_once():
+    net, snap = _world(rsu_xy=(500.0, 500.0), vehicle_x=(20.0,))
+    net.update(snap, force=True)
+    short = net.publish_hazard((10.0, 0.0, 0.0), duration_s=2.0)
+    keep = net.publish_hazard((10.0, 0.0, 0.0), duration_s=100.0)
+    net.update(_Snapshot(snap._snaps, t=2.5), force=True)
+    assert (short.station_id, 0) in net.denm_inbox[1]
+    net.update(_Snapshot(snap._snaps, t=4.0), force=True)                  # 1.0 + 2.0 + ... : short is over
+    assert [h.station_id for h in net.get_hazards()] == [keep.station_id]
+    assert (short.station_id, 0) not in net.denm_inbox[1]
+    assert net.cancel_denm(keep.station_id, 0) and net.get_hazards() == []
+    net.update(_Snapshot(snap._snaps, t=5.0), force=True)
+    assert net.denm_inbox[1] == {}
+
+
+def test_a_vehicle_originated_denm_goes_through_the_channel_as_v2v_to_the_others_but_not_back_to_itself():
+    net, snap = _world(rsu_xy=(500.0, 500.0), vehicle_x=(20.0, 60.0))
+    net.update(snap, force=True)
+    net.publish_denm(DENM(station_id=1, action_id=5, detection_time=1.0, reference_time=1.0, event_position=(20.0, 0.0, 0.0),
+                          cause_code=DENMCauseCode.VEHICLE_BREAKDOWN))
+    net.update(_Snapshot(snap._snaps, t=1.5), force=True)
+    links = [l for l in net.get_link_results() if l.msg_type == "DENM"]
+    assert [(l.link_type, l.tx_id, l.rx_id) for l in links] == [("V2V", 1, 2)]
+    assert (1, 5) in net.denm_inbox[2] and net.denm_inbox[1] == {}
+
+
+def test_denms_without_validity_never_expire_so_existing_users_are_unaffected():
+    net, snap = _world(rsu_xy=(500.0, 500.0), vehicle_x=(20.0,))
+    net.update(snap, force=True)
+    net.publish_denm(DENM(station_id=1, action_id=1, detection_time=0.0, reference_time=0.0, event_position=(0, 0, 0)))
+    net.update(_Snapshot(snap._snaps, t=10_000.0), force=True)
+    assert (1, 1) in net.denm_store
+
+
+def test_hazard_relevance_needs_range_and_movement_towards_the_event():
+    from src.traffic.advisory import hazard_is_relevant as rel
+    assert rel((0, 0), (10, 0), (50, 0), 100)                       # approaching, in range
+    assert not rel((0, 0), (-10, 0), (50, 0), 100)                  # driving away
+    assert not rel((0, 0), (10, 0), (150, 0), 100)                  # too far
+    assert not rel((0, 0), (0.1, 0), (50, 0), 100)                  # stopped
+    assert not rel((0, 0), (0, 10), (50, 0), 100)                   # perpendicular
+    assert rel((0, 0), (5, 5), (30, 20), 100)
+
+
+def test_every_attempt_appears_exactly_once_in_the_link_results():
+    """Regression: MAP/SPAT/VRUAM links were listed twice (the channel's list was aliased and the infrastructure links added again)."""
+    net, snap = _world(vehicle_x=(20.0, 60.0, 90.0))
+    net.register_vru(900, _Walker())
+    net.update(snap, force=True)
+    keys = [(l.msg_type, l.tx_id, l.rx_id) for l in net.get_link_results()]
+    assert len(keys) == len(set(keys)), "duplicate link records"
+    assert sum(1 for k in keys if k[0] == "BSM") == 3 * 2            # 3 vehicles, each sends to the 2 others
+    for msg in ("MAP", "SPAT", "VRUAM"):
+        assert sum(1 for k in keys if k[0] == msg) == 3              # one RSU/VRU to 3 vehicles
+    net.update(_Snapshot(snap._snaps, t=2.0), force=True)           # the second update starts fresh
+    assert len(net.get_link_results()) == len(keys)
+
+
+def test_link_results_are_complete_even_when_the_channel_does_not_record_them():
+    net = V2XNetwork(max_range=None, dsrc_config=DSRCConfig(shadowing_std_los_db=0.0, enable_nlos_model=False, record_links=False))
+    actor, snap = _vehicle(1, 20.0)
+    net.register(1, actor)
+    net.register_rsu(RoadSideUnit(RSUConfig(intersection_id=5, position=(0.0, 0.0, 0.0))))
+    net.update(_Snapshot({1: snap}), force=True)
+    assert sorted(l.msg_type for l in net.get_link_results()) == ["MAP", "SPAT"]

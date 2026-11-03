@@ -6,6 +6,10 @@ from typing import Any, Callable
 from fastapi import HTTPException
 
 
+class ConflictError(Exception):
+    """A request that is valid but not possible in the current state (HTTP 409), e.g. V2X is switched off."""
+
+
 async def on_sim_thread(world, fn: Callable[..., Any], *args: Any) -> Any:
     """Run ``fn(*args)`` on the world's simulation thread and await the result.
 

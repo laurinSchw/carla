@@ -44,9 +44,10 @@ import carla
 from src.lidar.carla_backend import CarlaLidarBackend
 from src.lidar.config import LidarConfig
 from src.lidar.manager import LidarError, LidarManager, StreamProfile
-from src.traffic.advisory import V2XAdvisory
+from src.traffic.advisory import V2XAdvisory, hazard_is_relevant
 from src.traffic.drivers import DriverAssigner, DriverProfile, apply_profile
 from src.recording.recorder import RunAlreadyRecording, RunRecorder, list_runs
+from src.server.route_utils import ConflictError
 from src.server.session_manager import SessionManager
 from src.server.sim_executor import SimThreadExecutor
 from src.server.world_config import WorldConfig
@@ -491,26 +492,71 @@ class PersistentCARLAServer:
         return profile
 
     def _advisory_step(self, sim_time: float) -> None:
-        """V2X-assisted driving (optional): a vehicle that RECEIVED threatening BSMs slows down for a while."""
+        """V2X-assisted driving (optional): vehicles react to what they RECEIVED (BSM threats, hazard warnings), never to ground truth."""
         net = self.v2x_network
         if net is None or not self.config.advisory.enabled:
             return
-        levels = {}
+        levels, hazards = {}, {}
         for vid in self._driver_of:
-            if vid in net.vehicles:
-                threats = net.get_threats(vid)
-                levels[vid] = max((t["level"] for t in threats), default=0)
-        for vid, action in self._advisory.update(sim_time, levels):
+            if vid not in net.vehicles:
+                continue
+            levels[vid] = max((t["level"] for t in net.get_threats(vid)), default=0)
+            bsm = net.get_bsm(vid)
+            if bsm is None:
+                continue
+            vel = (bsm.velocity_x, bsm.velocity_y) if bsm.velocity_x is not None else (
+                bsm.speed * math.cos(math.radians(bsm.heading)), bsm.speed * math.sin(math.radians(bsm.heading)))
+            hazards[vid] = any(
+                hazard_is_relevant((bsm.x_m, bsm.y_m), vel, d.event_position[:2], d.relevance_distance)
+                for d in net.denm_inbox.get(vid, {}).values()
+            )
+        cfg = self.config.advisory
+        for vid, action in self._advisory.update(sim_time, levels, hazards):
             profile = self._driver_of.get(vid)
             actor = next((a for a in self._background_vehicles if a.id == vid), None)
             if profile is None or actor is None:
                 continue
-            slow = profile.speed_pct + self.config.advisory.extra_slowdown_pct if action == "slow" else profile.speed_pct
+            extra = self._advisory.slowdown_pct(vid) if action == "slow" else 0.0
+            speed_pct = profile.speed_pct + extra
             try:
-                self.tm.vehicle_percentage_speed_difference(actor, slow)
+                self.tm.vehicle_percentage_speed_difference(actor, speed_pct)
             except Exception as exc:
                 logger.warning("advisory could not set speed for %s: %s", vid, exc)
-            self._record_event("advisory", actor_id=vid, action=action, speed_pct=slow, threat_level=levels.get(vid))
+            self._record_event("advisory", actor_id=vid, action=action, speed_pct=speed_pct, extra_slowdown_pct=extra,
+                               threat_level=levels.get(vid), hazard_received=hazards.get(vid, False))
+
+    # -- hazard warnings (admin acts as a roadside unit; sim thread) ---------------------------------
+    def publish_hazard(self, x: float, y: float, z: float = 0.0, cause_code: int = 10, duration_s: float = 30.0,
+                       relevance_distance_m: float = 150.0, tx_power_dbm: Optional[float] = None) -> dict:
+        """Place a hazard warning: it is broadcast through the channel and only received vehicles can react to it."""
+        self._require_sim_thread()
+        if self.v2x_network is None:
+            raise ConflictError("V2X is disabled")
+        kwargs = {} if tx_power_dbm is None else {"tx_power_dbm": tx_power_dbm}
+        denm = self.v2x_network.publish_hazard((x, y, z), cause_code, duration_s, relevance_distance_m,
+                                               sim_time=self._sim_time, **kwargs)
+        info = self._hazard_info(denm)
+        self._record_event("hazard_publish", **info)
+        return info
+
+    def clear_hazard(self, station_id: int) -> bool:
+        self._require_sim_thread()
+        net = self.v2x_network
+        ok = net is not None and net.cancel_denm(station_id, 0)
+        if ok:
+            self._record_event("hazard_clear", station_id=station_id)
+        return ok
+
+    def get_hazards(self) -> list:
+        net = self.v2x_network
+        return [self._hazard_info(d) for d in net.get_hazards()] if net else []
+
+    @staticmethod
+    def _hazard_info(denm) -> dict:
+        return {"station_id": denm.station_id, "x_m": denm.event_position[0], "y_m": denm.event_position[1],
+                "z_m": denm.event_position[2], "cause_code": int(denm.cause_code), "cause": denm.cause_code.name,
+                "relevance_distance_m": denm.relevance_distance, "reference_time": denm.reference_time,
+                "expires_sim_time": None if denm.validity_duration is None else denm.reference_time + denm.validity_duration}
 
     def _maybe_register_background_v2x(self, actor) -> None:
         """Make a background vehicle a V2X station with probability ``v2x_penetration_rate``."""

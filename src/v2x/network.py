@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     import carla
 
 from .safety_messages import (
-    BSMCore, V2VEnhancedMessage, DENM, create_bsm_from_carla, calculate_threat_level,
+    BSMCore, V2VEnhancedMessage, DENM, DENMCauseCode, create_bsm_from_carla, calculate_threat_level,
     V2V_RANGE_MEDIUM, SHARE_SENSOR_DATA_DISTANCE
 )
 from .dsrc_channel import DSRCChannel, DSRCConfig, LinkResult
@@ -29,6 +29,11 @@ from .messages import (
 from .rsu import RoadSideUnit
 
 logger = logging.getLogger(__name__)
+
+#: station ids of admin-injected hazards start here, far above CARLA actor ids, so they never collide with a vehicle
+HAZARD_STATION_BASE = 1_000_000
+#: TX power of a virtual hazard source (roadside-unit class). Project default, unverified (see docs/science/model.md)
+HAZARD_TX_POWER_DBM = 33.0
 
 # float slack for the sim-time update gate (CARLA timestamps accumulate rounding error)
 _GATE_TOLERANCE_S = 1e-6
@@ -125,6 +130,11 @@ class V2XNetwork:
 
         # DENM store: (station_id, action_id) → DENM
         self.denm_store: Dict[Tuple[int, int], DENM] = {}
+        # What each vehicle actually RECEIVED through the channel: rx vehicle -> (station, action) -> DENM
+        self.denm_inbox: Dict[int, Dict[Tuple[int, int], DENM]] = {}
+        # Virtual roadside sources of admin-injected hazards: station_id -> TX power (dBm)
+        self._hazard_tx_power: Dict[int, float] = {}
+        self._next_hazard_id = HAZARD_STATION_BASE
 
         # DSRC/WAVE (IEEE 802.11p) channel model
         self._dsrc_channel = DSRCChannel(dsrc_config)
@@ -280,7 +290,8 @@ class V2XNetwork:
             frame=self._frame_for_links, sim_time=self.last_update_sim_time or 0.0,
             awareness_range_m=self.max_range,
         )
-        self.last_links = self._dsrc_channel.last_links
+        # a COPY: the channel keeps appending every later evaluate_link() to its own list (infrastructure messages too)
+        self.last_links = list(self._dsrc_channel.last_links)
 
         t_channel = time.perf_counter()
         # ── Phase 3: Neighbor discovery using channel-filtered BSM view ───────
@@ -544,6 +555,44 @@ class V2XNetwork:
 
     # ── DENM management ─────────────────────────────────────────────────────────
 
+    def publish_hazard(
+        self,
+        position: Tuple[float, float, float],
+        cause_code=DENMCauseCode.OBSTACLE_ON_ROAD,
+        duration_s: float = 30.0,
+        relevance_distance_m: float = 150.0,
+        tx_power_dbm: float = HAZARD_TX_POWER_DBM,
+        sim_time: Optional[float] = None,
+    ) -> DENM:
+        """Inject a hazard warning (an admin acts as a roadside unit at ``position``).
+
+        It is transmitted every update through the DSRC channel like any other message (link_type ``I2V``,
+        msg_type ``DENM``), so vehicles only know about it if they RECEIVED it. Expires ``duration_s`` simulation
+        seconds after ``sim_time`` (default: the last update's time).
+        """
+        now = self.last_update_sim_time if sim_time is None else sim_time
+        now = 0.0 if now is None else now
+        station_id = self._next_hazard_id
+        self._next_hazard_id += 1
+        denm = DENM(
+            station_id=station_id, action_id=0, detection_time=now, reference_time=now,
+            event_position=tuple(position), cause_code=DENMCauseCode(cause_code),
+            relevance_distance=relevance_distance_m, validity_duration=duration_s,
+        )
+        self._hazard_tx_power[station_id] = tx_power_dbm
+        self.publish_denm(denm)
+        return denm
+
+    def get_hazards(self) -> List[DENM]:
+        """Active admin-injected hazards (virtual stations)."""
+        return [d for d in self.denm_store.values() if d.station_id in self._hazard_tx_power]
+
+    def _expire_denms(self, sim_time: float) -> None:
+        for key, d in list(self.denm_store.items()):
+            if d.validity_duration is not None and sim_time > d.reference_time + d.validity_duration:
+                del self.denm_store[key]
+                self._hazard_tx_power.pop(d.station_id, None)
+
     def publish_denm(self, denm: DENM) -> None:
         """
         Store or update a DENM alert originating from *station_id*.
@@ -568,6 +617,7 @@ class V2XNetwork:
         key = (station_id, action_id)
         if key in self.denm_store:
             del self.denm_store[key]
+            self._hazard_tx_power.pop(station_id, None)
             logger.debug("DENM cancelled: station=%d action=%d", station_id, action_id)
             return True
         return False
@@ -769,16 +819,33 @@ class V2XNetwork:
         spat_inbox: Dict[int, Dict[int, SPATMessage]] = {vid: {} for vid in vehicle_pos}
         map_inbox: Dict[int, Dict[int, MAPMessage]] = {vid: {} for vid in vehicle_pos}
         vruam_inbox: Dict[int, Dict[int, VRUAwarenessMessage]] = {vid: {} for vid in vehicle_pos}
+        denm_inbox: Dict[int, Dict[Tuple[int, int], DENM]] = {vid: {} for vid in vehicle_pos}
         links: List[LinkResult] = []
 
-        def transmit(key, tx_id, tx_xy, tx_power, link_type, messages, inboxes):
+        self._expire_denms(sim_time)
+        # every active DENM is sent from its originator: a vehicle (V2V) or a virtual roadside unit at the event (I2V)
+        denm_sources = []
+        for (station_id, action_id), denm in self.denm_store.items():
+            if station_id in vehicle_pos:
+                denm_sources.append((station_id, station_id, vehicle_pos[station_id], None, "V2V", denm))
+            elif station_id in self._hazard_tx_power:
+                xy = (denm.event_position[0], denm.event_position[1])
+                denm_sources.append((("hazard", station_id), station_id, xy, self._hazard_tx_power[station_id], "I2V", denm))
+        for key, _tx_id, xy, _p, _lt, _d in denm_sources:
+            if isinstance(key, tuple):
+                stations[key] = xy
+
+        def transmit(key, tx_id, tx_xy, tx_power, link_type, items, exclude_rx=None):
+            """items: (msg_type, message, inbox dict, key under which a receiver stores it)."""
             n_contenders = channel._count_contenders(key, tx_xy, stations)
             nlos_by_rx = (
-                channel.nlos_to_receivers(None, tx_xy, vehicle_pos) if channel.config.enable_nlos_model else {}
+                channel.nlos_to_receivers(exclude_rx, tx_xy, vehicle_pos) if channel.config.enable_nlos_model else {}
             )
             for rx_id, rx_xy in vehicle_pos.items():
+                if rx_id == exclude_rx:
+                    continue
                 los_blocked = nlos_by_rx.get(rx_id, False)
-                for msg_type, msg, inbox in zip(("MAP", "SPAT", "VRUAM"), messages, inboxes):
+                for msg_type, msg, inbox, store_key in items:
                     if msg is None:
                         continue
                     link = channel.evaluate_link(
@@ -788,18 +855,21 @@ class V2XNetwork:
                     )
                     links.append(link)
                     if link.delivered:
-                        inbox[rx_id][tx_id] = msg
+                        inbox[rx_id][store_key] = msg
 
         for iid, xy in rsu_pos.items():
             transmit(("rsu", iid), iid, xy, self._rsus[iid].config.tx_power_dbm, "I2V",
-                     (self.map_messages.get(iid), self.spat_messages.get(iid), None),
-                     (map_inbox, spat_inbox, vruam_inbox))
+                     (("MAP", self.map_messages.get(iid), map_inbox, iid),
+                      ("SPAT", self.spat_messages.get(iid), spat_inbox, iid)))
         for vid, xy in vru_pos.items():
-            transmit(("vru", vid), vid, xy, None, "P2V",
-                     (None, None, self.vru_messages.get(vid)),
-                     (map_inbox, spat_inbox, vruam_inbox))
+            transmit(("vru", vid), vid, xy, None, "P2V", (("VRUAM", self.vru_messages.get(vid), vruam_inbox, vid),))
+        for key, tx_id, xy, power, link_type, denm in denm_sources:
+            transmit(key, tx_id, xy, power, link_type,
+                     (("DENM", denm, denm_inbox, (denm.station_id, denm.action_id)),),
+                     exclude_rx=tx_id if link_type == "V2V" else None)
 
         self.map_inbox, self.spat_inbox, self.vruam_inbox = map_inbox, spat_inbox, vruam_inbox
+        self.denm_inbox = denm_inbox
         self.last_links = self.last_links + links
 
     # ── Public accessors ───────────────────────────────────────────────────────

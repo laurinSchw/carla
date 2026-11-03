@@ -174,8 +174,13 @@ def test_advisory_slows_a_threatened_vehicle_then_restores_its_own_speed(env):
         vehicles = {victim.id: victim}
         level = 4
 
+        denm_inbox = {}
+
         def get_threats(self, vid):
             return [{"level": Net.level}]
+
+        def get_bsm(self, vid):
+            return None
 
     srv.v2x_network = Net()
     srv.submit(lambda: srv._advisory_step(10.0)).result(5)
@@ -185,3 +190,57 @@ def test_advisory_slows_a_threatened_vehicle_then_restores_its_own_speed(env):
     assert applied[-2:] == [base + 40.0, base]
     events = [e for e in (json.loads(l) for l in (Path(srv.recorder.path) / "events.jsonl").read_text().splitlines()) if e["kind"] == "advisory"]
     assert [e["action"] for e in events] == ["slow", "restore"] and events[0]["threat_level"] == 4
+
+
+def test_a_vehicle_that_received_a_relevant_hazard_slows_down_and_restores_afterwards(env):
+    rec, make, _ = env
+    srv = make(advisory=AdvisoryConfig(enabled=True, hazard_slowdown_pct=60.0, hold_s=1.0))
+    srv.submit(srv.spawn_background_traffic, 3).result(5)
+    near, far, blind = srv._background_vehicles[:3]
+    srv.submit(srv.start_run, "hazard").result(5)
+    from types import SimpleNamespace as NS
+    from src.v2x.safety_messages import DENM, DENMCauseCode
+    hazard = DENM(station_id=1_000_000, action_id=0, detection_time=0.0, reference_time=0.0, event_position=(100.0, 0.0, 0.0),
+                  cause_code=DENMCauseCode.ACCIDENT, relevance_distance=120.0)
+
+    class Net:
+        vehicles = {near.id: near, far.id: far, blind.id: blind}
+        denm_inbox = {near.id: {(1_000_000, 0): hazard}, far.id: {(1_000_000, 0): hazard}, blind.id: {}}   # `blind` did not receive it
+        positions = {near.id: (20.0, 0.0), far.id: (-400.0, 0.0), blind.id: (30.0, 0.0)}
+
+        def get_threats(self, vid):
+            return []
+
+        def get_bsm(self, vid):
+            x, y = Net.positions[vid]
+            return NS(x_m=x, y_m=y, velocity_x=10.0, velocity_y=0.0, speed=10.0, heading=0.0)
+
+    srv.v2x_network = Net()
+    base = srv._driver_of[near.id].speed_pct
+    srv.submit(lambda: srv._advisory_step(10.0)).result(5)
+    applied = {c[2][0]: c[2][1][0] for c in rec.calls if c[0] == "tm.vehicle_percentage_speed_difference"}
+    assert applied[near.id] == base + 60.0                        # received + in range + approaching: slowed
+    assert applied[far.id] == srv._driver_of[far.id].speed_pct    # received but 500 m away: untouched (the spawn-time value)
+    assert applied[blind.id] == srv._driver_of[blind.id].speed_pct  # never received it: untouched
+    Net.denm_inbox[near.id] = {}                                  # the warning stops arriving
+    srv.submit(lambda: srv._advisory_step(12.0)).result(5)
+    last = [c[2][1][0] for c in rec.calls if c[0] == "tm.vehicle_percentage_speed_difference" and c[2][0] == near.id][-1]
+    assert last == base
+    events = [json.loads(l) for l in (Path(srv.recorder.path) / "events.jsonl").read_text().splitlines()]
+    adv = [e for e in events if e["kind"] == "advisory"]
+    assert [(e["actor_id"], e["action"], e["hazard_received"]) for e in adv] == [(near.id, "slow", True), (near.id, "restore", False)]
+
+
+def test_publishing_and_clearing_a_hazard_is_recorded_and_needs_v2x(env):
+    rec, make, _ = env
+    srv = make()
+    srv.submit(srv.start_run, "hz").result(5)
+    h = srv.submit(srv.publish_hazard, 5.0, 6.0, 0.0, 3, 20.0, 80.0).result(5)
+    assert h["cause"] == "ROAD_WORKS" and h["relevance_distance_m"] == 80.0 and [x["station_id"] for x in srv.get_hazards()] == [h["station_id"]]
+    assert srv.submit(srv.clear_hazard, h["station_id"]).result(5) is True and srv.get_hazards() == []
+    kinds = [json.loads(l)["kind"] for l in (Path(srv.recorder.path) / "events.jsonl").read_text().splitlines()]
+    assert "hazard_publish" in kinds and "hazard_clear" in kinds
+    off = make(v2x_enabled=False)
+    from src.server.route_utils import ConflictError
+    with pytest.raises(ConflictError, match="V2X is disabled"):
+        off.submit(off.publish_hazard, 0.0, 0.0).result(5)

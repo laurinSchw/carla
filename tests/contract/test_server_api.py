@@ -61,7 +61,7 @@ def test_openapi_schema_is_served(client):
 
 # --- admin auth ---------------------------------------------------------
 
-ADMIN_GETS = ["/admin/status", "/admin/sessions", "/admin/v2x/rsus", "/admin/v2x/vrus", "/admin/v2x/spat", "/admin/v2x/links", "/admin/runs"]
+ADMIN_GETS = ["/admin/status", "/admin/sessions", "/admin/v2x/rsus", "/admin/v2x/vrus", "/admin/v2x/spat", "/admin/v2x/links", "/admin/runs", "/admin/v2x/hazards"]
 
 
 @pytest.mark.parametrize("path", ADMIN_GETS)
@@ -420,3 +420,29 @@ def test_connect_request_carries_seed_drivers_and_advisory_settings():
                       advisory=AdvisoryConfig(enabled=req.advisory_enabled, trigger_level=req.advisory_trigger_level))
     assert cfg.seed == 7 and cfg.drivers_enabled is False and cfg.advisory.enabled and cfg.advisory.trigger_level == 2
     assert cfg.driver_mix.weights() == [1.0, 0.0, 0.0]
+
+
+# --- hazard warnings -------------------------------------------------------
+
+def test_hazard_lifecycle_over_http(client, world):
+    r = client.post("/admin/v2x/hazards", json={"x": 10.5, "y": -3.0, "cause_code": 2, "duration_s": 20, "relevance_distance_m": 90},
+                    headers=AUTH)
+    assert r.status_code == 201
+    h = r.json()
+    assert h["station_id"] >= 1_000_000 and h["cause"] == "ACCIDENT" and h["relevance_distance_m"] == 90 and h["x_m"] == 10.5
+    assert [x["station_id"] for x in client.get("/admin/v2x/hazards", headers=AUTH).json()] == [h["station_id"]]
+    assert client.delete(f"/admin/v2x/hazards/{h['station_id']}", headers=AUTH).json() == {"cleared": h["station_id"]}
+    assert client.delete(f"/admin/v2x/hazards/{h['station_id']}", headers=AUTH).status_code == 404
+    assert client.get("/admin/v2x/hazards", headers=AUTH).json() == []
+
+
+def test_hazard_validation_and_errors(client, world):
+    ok = {"x": 0, "y": 0}
+    assert client.post("/admin/v2x/hazards", json={}, headers=AUTH).status_code == 422                       # coordinates required
+    assert client.post("/admin/v2x/hazards", json={**ok, "duration_s": 0}, headers=AUTH).status_code == 422
+    assert client.post("/admin/v2x/hazards", json={**ok, "cause_code": 300}, headers=AUTH).status_code == 422
+    assert client.post("/admin/v2x/hazards", json={**ok, "cause_code": 8}, headers=AUTH).status_code == 422   # not a known cause
+    world.v2x_on = False
+    r = client.post("/admin/v2x/hazards", json=ok, headers=AUTH)
+    assert r.status_code == 409 and "disabled" in r.json()["detail"]
+    assert client.post("/admin/v2x/hazards", json=ok).status_code == 422                                     # token header missing

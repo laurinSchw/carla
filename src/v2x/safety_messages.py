@@ -523,6 +523,10 @@ class DENM:
     # Termination flag (None = active, "isCancellation" = revoked)
     termination: Optional[str] = None
 
+    # Simulation seconds the event stays valid after ``reference_time`` (None = until cancelled). ETSI's validityDuration
+    # plays this role; here the network drops an expired DENM at its next update.
+    validity_duration: Optional[float] = None
+
 
 def create_cam_from_bsm(bsm: 'BSMCore') -> 'CooperativeAwarenessMessage':
     """

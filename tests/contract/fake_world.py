@@ -151,6 +151,25 @@ class FakeWorld:
     def get_run_status(self):
         return {"current": self.recorder.summary() if self.recorder else None, "runs": list_runs(self._runs_dir)}
 
+    # --- hazards ----------------------------------------------------------
+    def publish_hazard(self, x, y, z=0.0, cause_code=10, duration_s=30.0, relevance_distance_m=150.0, tx_power_dbm=None):
+        from src.v2x.safety_messages import DENMCauseCode
+        if not getattr(self, "v2x_on", True):
+            from src.server.route_utils import ConflictError
+            raise ConflictError("V2X is disabled")
+        cause = DENMCauseCode(cause_code)               # ValueError for unknown codes, like the real server
+        self._hazards = getattr(self, "_hazards", {})
+        sid = 1_000_000 + len(self._hazards)
+        self._hazards[sid] = {"station_id": sid, "x_m": x, "y_m": y, "z_m": z, "cause_code": int(cause), "cause": cause.name,
+                              "relevance_distance_m": relevance_distance_m, "reference_time": 0.0, "expires_sim_time": duration_s}
+        return self._hazards[sid]
+
+    def clear_hazard(self, station_id):
+        return getattr(self, "_hazards", {}).pop(station_id, None) is not None
+
+    def get_hazards(self):
+        return list(getattr(self, "_hazards", {}).values())
+
     # --- admin population ------------------------------------------------
     def spawn_background_traffic(self, count):
         self.background += count

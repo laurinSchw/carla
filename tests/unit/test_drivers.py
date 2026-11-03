@@ -107,3 +107,39 @@ def test_below_trigger_level_does_nothing_and_forget_clears_state():
     a.update(1.0, {1: 4})
     a.forget(1)
     assert a.active == 0
+
+
+# ── hazard advisory ──────────────────────────────────────────────────────────
+
+def hadv(**kw):
+    return V2XAdvisory(AdvisoryConfig(enabled=True, trigger_level=3, extra_slowdown_pct=40.0, hazard_slowdown_pct=60.0, hold_s=3.0, **kw))
+
+
+def test_a_received_relevant_hazard_slows_the_vehicle_more_than_a_threat_does():
+    a = hadv()
+    assert a.update(0.0, {}, {7: True}) == [(7, "slow")] and a.slowdown_pct(7) == 60.0
+    b = hadv()
+    b.update(0.0, {7: 4}, {})
+    assert b.slowdown_pct(7) == 40.0
+
+
+def test_a_hazard_arriving_during_a_threat_slowdown_strengthens_it_and_it_is_held_until_the_episode_ends():
+    a = hadv()
+    a.update(0.0, {1: 4}, {})
+    assert a.update(1.0, {1: 4}, {1: True}) == [(1, "slow")] and a.slowdown_pct(1) == 60.0
+    assert a.update(2.0, {1: 4}, {}) == [] and a.slowdown_pct(1) == 60.0        # threat alone must not weaken the episode
+    assert a.update(5.1, {}, {}) == [(1, "restore")] and a.slowdown_pct(1) == 0.0
+
+
+def test_hazard_slowdown_ends_hold_seconds_after_the_warning_stops_arriving():
+    a = hadv()
+    a.update(10.0, {}, {3: True})
+    assert a.update(12.0, {}, {3: False}) == []
+    assert a.update(13.1, {}, {3: False}) == [(3, "restore")]
+
+
+def test_vehicles_that_never_received_the_hazard_are_not_slowed_and_disabled_advisory_ignores_hazards():
+    a = hadv()
+    assert a.update(0.0, {1: 0, 2: 0}, {1: True, 2: False}) == [(1, "slow")] and a.slowdown_pct(2) == 0.0
+    off = V2XAdvisory(AdvisoryConfig(enabled=False))
+    assert off.update(0.0, {}, {1: True}) == []
