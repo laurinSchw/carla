@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 import src.server.admin_routes as _admin_mod
 import src.server.client_routes as _client_mod
+import src.server.hub_routes as _hub_mod
 
 WEB_DIR = Path(__file__).parent.parent / "visualization" / "web"
 
@@ -46,6 +47,7 @@ async def _validation_error(_request: Request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": errors})
 app.include_router(_admin_mod.router)
 app.include_router(_client_mod.router)
+app.include_router(_hub_mod.router)
 
 if (WEB_DIR / "static").exists():
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
@@ -57,6 +59,7 @@ def set_persistent_world(world) -> None:
     """Register the PersistentCARLAServer with the admin and client routes."""
     _admin_mod.set_persistent_world(world)
     _client_mod.set_persistent_world(world)
+    _hub_mod.set_persistent_world(world)
 
 
 # /admin/connect creates a world after startup and propagates it through this module.

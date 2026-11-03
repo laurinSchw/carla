@@ -239,7 +239,7 @@ def _events(ctx: ProviderContext) -> Optional[Published]:
 
 
 def _run_status(ctx: ProviderContext) -> Optional[Published]:
-    return ctx.source.get_run_status()
+    return ctx.source.get_run_status_published()
 
 
 _AO = frozenset({ADMIN_R, OBSERVER_R})

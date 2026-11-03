@@ -288,6 +288,7 @@ def _lidar_session(client, world, name="car-1", enable=True):
 
 def test_join_with_lidar_returns_a_ws_url_and_the_sensor_goes_active_after_ticks(client, world):
     j = _lidar_session(client, world)
+    assert len(j["session_token"]) >= 24 and j["session_token"] != j["session_id"]
     assert j["lidar_ws_url"] == f"/ws/lidar/{j['session_id']}" and j["lidar_error"] is None
     assert client.get(f"/client/lidar/{j['session_id']}").json()["sensor"]["state"] == "requested"
     world.tick_lidar(2)
