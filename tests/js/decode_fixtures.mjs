@@ -1,8 +1,8 @@
 // Decode every <name>.bin in a directory with the browser decoder and print one JSON object per file.
-// Used by tests/unit/test_lidar_protocol_v3.py to prove Python-encoded bytes decode identically in JS.
+// Used by tests/unit/test_js_modules.py to prove Python-encoded bytes decode identically in JS.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { decodeFrameAsync } from '../../src/web/static/js/lidar-decoder.js';
+import { decodeFrameAsync } from '../../src/visualization/web/static/js/lidar-decoder.js';
 
 const dir = process.argv[2];
 const out = {};

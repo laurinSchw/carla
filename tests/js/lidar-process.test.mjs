@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { decodeFrame } from '../../src/web/static/js/lidar-decoder.js';
-import { processFrame, availableModes, ramp, paletteLut, RateMeter, frameGapSeconds } from '../../src/web/static/js/lidar-process.js';
+import { decodeFrame } from '../../src/visualization/web/static/js/lidar-decoder.js';
+import { processFrame, availableModes, ramp, paletteLut, RateMeter, frameGapSeconds } from '../../src/visualization/web/static/js/lidar-process.js';
 
 const dir = process.env.JS_FIXTURES;
 const load = (name) => {

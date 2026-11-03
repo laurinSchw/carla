@@ -46,7 +46,8 @@ Once running, access the web interface at:
 |------|-----|-------------|
 | **Home** | http://localhost:8000/ | Links to the pages below |
 | **Admin panel** | http://localhost:8000/admin | Connect to CARLA, traffic, V2X (admin token required) |
-| **Client join** | http://localhost:8000/client | Join as a vehicle |
+| **Observer** | http://localhost:8000/observer | Read-only live map and V2X view |
+| **Vehicle** | http://localhost:8000/vehicle | Join as a vehicle (`/client` redirects here) |
 
 ## Architecture
 

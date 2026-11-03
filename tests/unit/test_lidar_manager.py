@@ -186,6 +186,7 @@ def test_over_budget_request_gets_a_409_with_numbers(env):
         mgr.request("b", 8, cfg(pps=400_000), own_actor_id=8)
     assert err.value.status == 409
     assert err.value.detail == {"error": "lidar_budget_exceeded", "message": "LiDAR budget exceeded",
+                                "reason": "points_per_second",          # the web UI shows it (api.js describeDetail)
                                 "requested_pps": 400_000, "available_pps": 300_000, "sensors": 1, "max_sensors": 2}
 
 
@@ -557,3 +558,66 @@ def test_encode_cache_does_not_thrash_between_sensors_at_different_frames(env):
     assert (fa is None) == (again_a is None) and (fb is None) == (again_b is None)
     if fa and again_a:
         assert fa[1] is again_a[1]                       # still the cached bytes object
+
+
+# ── published owner label, flags, destroy by actor, counted stream frames (lidar_routes) ──────
+
+def test_published_owner_is_the_label_and_ownership_stays_with_the_key(env):
+    mgr, _, _ = env
+    s = mgr.request("session-uuid", 7, cfg(), own_actor_id=7, label="car-1")
+    assert [i["owner"] for i in mgr.list_sensors()] == ["car-1"]
+    assert "session-uuid" not in repr(mgr.list_sensors())
+    assert mgr.sensor_of_owner("session-uuid")["sensor_id"] == s.sensor_id and mgr.sensor_of_owner("car-1") is None
+    assert mgr.owner_of(s.sensor_id) == "session-uuid"
+    with pytest.raises(LidarPermissionError):
+        mgr.release(s.sensor_id, requester="car-1")
+
+
+def test_set_flags_pins_and_unpinning_starts_the_keep_alive(env):
+    mgr, _, clock = env
+    s = mgr.request("admin", 7, cfg(), is_admin=True)
+    mgr.tick()
+    mgr.set_flags(s.sensor_id, pinned=True)
+    clock.t += 100
+    mgr.tick()
+    assert mgr.get_info(s.sensor_id)["pinned"] is True and mgr.get_info(s.sensor_id)["state"] == "active"
+    mgr.set_flags(s.sensor_id, pinned=False)
+    clock.t += 5
+    mgr.tick()
+    assert mgr.get_info(s.sensor_id)["state"] == "active"          # keep-alive counts from the unpin, not from the spawn
+    clock.t += 6
+    mgr.tick(2)
+    assert mgr.get_info(s.sensor_id) is None
+    with pytest.raises(LidarNotFound):
+        mgr.set_flags(s.sensor_id, pinned=True)
+
+
+def test_destroy_actor_now_removes_every_owners_sensor_on_that_actor(env):
+    mgr, backend, _ = env
+    a = mgr.request("admin", 7, cfg(pps=100_000), is_admin=True)
+    keep = mgr.request("s2", 8, cfg(pps=100_000), own_actor_id=8)
+    mgr.tick()
+    assert mgr.destroy_actor_now(7) == 1 and mgr.destroy_actor_now(7) == 0
+    assert [i["sensor_id"] for i in mgr.list_sensors()] == [keep.sensor_id] and len(backend.live) == 1
+    assert mgr.get_info(a.sensor_id) is None and mgr.budget()["sensors"] == 1
+    mgr.request("s1", 8, cfg(pps=100_000), own_actor_id=8)       # the vehicle's own and the admin's sensor on actor 8
+    assert mgr.destroy_actor_now(8) == 2 and mgr.list_sensors() == [] and not backend.live
+
+
+def test_counted_stream_frame_reports_total_and_sent_points(env):
+    mgr, _, _ = env
+    s = mgr.request("a", 7, cfg(pps=400_000), own_actor_id=7)
+    mgr.tick(2)
+    frame, data, total, sent = mgr.get_stream_frame_counted(s.sensor_id, StreamProfile(max_points=10_000))
+    assert (total, sent) == (20_000, 10_000) and len(protocol.decode(data)[1]) == 10_000
+    assert mgr.get_stream_frame_counted(s.sensor_id, StreamProfile())[2:] == (20_000, 20_000)
+    assert mgr.get_stream_frame_counted(s.sensor_id, StreamProfile(), after_frame=frame) is None
+
+
+def test_budget_error_says_which_limit(env):
+    mgr, _, _ = env
+    mgr.request("a", 7, cfg(pps=100_000), own_actor_id=7)
+    mgr.request("b", 8, cfg(pps=100_000), own_actor_id=8)
+    with pytest.raises(LidarBudgetExceeded) as err:
+        mgr.request("c", 9, cfg(pps=100_000), own_actor_id=9)
+    assert err.value.detail["reason"] == "max_sensors"

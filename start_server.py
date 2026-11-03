@@ -18,8 +18,12 @@ Options
 --carla-port PORT   CARLA server port        (default: 2000)
 --admin-token TOKEN Admin API token          (default: read from ADMIN_TOKEN env)
 --port PORT         Web server port          (default: 8000)
---no-v2v            Disable V2V network
---v2v-range M       V2V cooperative range in metres (default: 75)
+--no-v2x            Disable the V2X network
+--fake              No CARLA needed: run the real server on a deterministic synthetic world (implies --live).
+                    For frontend work and smoke tests. Not a simulator: see src/testing/fake_carla.
+--fake-vehicles N   Background vehicles spawned at start in --fake mode (default: 12)
+--fake-pedestrians N  Pedestrians spawned at start in --fake mode (default: 6)
+--fake-seed N       Seed of the synthetic world's own randomness (default: 0; the simulation seed is --seed)
 """
 
 import argparse
@@ -34,8 +38,6 @@ from pathlib import Path
 _project_root = Path(__file__).resolve().parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
-
-from src.server.app import run_server, set_persistent_world  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,6 +81,11 @@ def _parse_args() -> argparse.Namespace:
                    help="Share (0..1) of background vehicles that are V2X stations")
     p.add_argument("--tm-port", type=int, default=8001,
                    help="CARLA Traffic Manager port")
+    p.add_argument("--fake", action="store_true",
+                   help="Run on a deterministic synthetic world instead of CARLA (implies --live)")
+    p.add_argument("--fake-vehicles", type=int, default=12, help="Background vehicles at start (--fake)")
+    p.add_argument("--fake-pedestrians", type=int, default=6, help="Pedestrians at start (--fake)")
+    p.add_argument("--fake-seed", type=int, default=0, help="Seed of the synthetic world (--fake)")
     return p.parse_args()
 
 
@@ -88,6 +95,13 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
+    if args.fake:
+        # must happen before anything imports ``carla``; production paths never import src.testing
+        from src.testing.fake_carla import install
+        install(args.fake_seed)
+        args.live = True
+        args.carla_host = "fake"
+    from src.server.app import run_server, set_persistent_world
 
     # --- Admin token --------------------------------------------------------
     token = args.admin_token or os.environ.get("ADMIN_TOKEN", "")
@@ -109,8 +123,11 @@ def main() -> None:
     print(f"  Admin panel  : http://localhost:{args.port}/admin   (token required)")
     print(f"  Client join  : http://localhost:{args.port}/client  (open)")
     print(f"  Admin token  : {token}")
-    if args.live:
+    if args.fake:
+        print("  CARLA        : FAKE - a synthetic world, not a simulator (see src/testing/fake_carla)")
+    elif args.live:
         print(f"  CARLA host   : {args.carla_host}:{args.carla_port}")
+    if args.live:
         print(f"  V2X          : {'disabled' if args.no_v2x else f'enabled, range={args.v2x_range:.0f} m'}")
     else:
         print("  Mode         : frontend-only (use --live to start simulation)")
@@ -140,6 +157,9 @@ def main() -> None:
             ))
             world.start()
             set_persistent_world(world)
+            if args.fake:
+                world.submit(world.spawn_background_traffic, args.fake_vehicles).result(30)
+                world.submit(world.spawn_pedestrians, args.fake_pedestrians).result(30)
             logger.info("Persistent CARLA world started")
         except Exception as exc:
             logger.error("Failed to start persistent world: %s", exc)

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Store } from '../../src/web/static/js/store.js';
+import { Store } from '../../src/visualization/web/static/js/store.js';
 
 const env = (topic, seq, frame, simTime, data = {}) => ({ topic, seq, frame, sim_time: simTime, data });
 

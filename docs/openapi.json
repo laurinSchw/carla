@@ -1,0 +1,3820 @@
+{
+  "components": {
+    "schemas": {
+      "ConnectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "advisory_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advisory Enabled"
+          },
+          "advisory_extra_slowdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advisory Extra Slowdown Pct"
+          },
+          "advisory_hazard_slowdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advisory Hazard Slowdown Pct"
+          },
+          "advisory_hold_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advisory Hold S"
+          },
+          "advisory_trigger_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advisory Trigger Level"
+          },
+          "awareness_range_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Awareness Range M"
+          },
+          "carla_host": {
+            "default": "192.168.1.110",
+            "title": "Carla Host",
+            "type": "string"
+          },
+          "carla_port": {
+            "default": 2000,
+            "maximum": 65535.0,
+            "minimum": 1.0,
+            "title": "Carla Port",
+            "type": "integer"
+          },
+          "driver_mix_aggressive": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Driver Mix Aggressive"
+          },
+          "driver_mix_cautious": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Driver Mix Cautious"
+          },
+          "driver_mix_normal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Driver Mix Normal"
+          },
+          "drivers_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drivers Enabled"
+          },
+          "event_log_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Log Size"
+          },
+          "fixed_delta_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Delta Seconds"
+          },
+          "global_speed_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Speed Pct"
+          },
+          "lidar_frame_timeout_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lidar Frame Timeout S"
+          },
+          "lidar_keep_alive_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lidar Keep Alive S"
+          },
+          "lidar_max_consecutive_misses": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lidar Max Consecutive Misses"
+          },
+          "lidar_max_points_per_second": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lidar Max Points Per Second"
+          },
+          "lidar_max_sensors": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lidar Max Sensors"
+          },
+          "max_substep_delta_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Substep Delta Time"
+          },
+          "max_substeps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Substeps"
+          },
+          "observer_public": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observer Public"
+          },
+          "realtime": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realtime"
+          },
+          "rsu_max_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rsu Max Count"
+          },
+          "safety_distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safety Distance M"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "session_disconnect_grace_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Disconnect Grace S"
+          },
+          "timeout_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout S"
+          },
+          "tm_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tm Port"
+          },
+          "v2x_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "V2X Enabled"
+          },
+          "v2x_links_max_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "V2X Links Max Rows"
+          },
+          "v2x_penetration_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "V2X Penetration Rate"
+          },
+          "v2x_update_rate_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "V2X Update Rate Hz"
+          },
+          "world_state_rate_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "World State Rate Hz"
+          }
+        },
+        "title": "ConnectRequest",
+        "type": "object"
+      },
+      "DenmRequest": {
+        "properties": {
+          "cause_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "default": "ACCIDENT",
+            "description": "ETSI cause code number or name: RESERVED, TRAFFIC_CONDITION, ACCIDENT, ROAD_WORKS, ADVERSE_WEATHER_ADHESION, HAZARDOUS_SURFACE, OBSTACLE_ON_ROAD, ANIMAL_ON_ROAD, HUMAN_PRESENCE_ON_ROAD, WRONG_WAY_DRIVING, RESCUE_RECOVERY_IN_PROGRESS, SLOW_VEHICLE, VEHICLE_BREAKDOWN, POST_CRASH, HUMAN_PROBLEM, STATIONARY_VEHICLE, EMERGENCY_VEHICLE_APPROACHING, DANGEROUS_CURVE, COLLISION_RISK, SIGNAL_VIOLATION, DANGEROUS_END_OF_QUEUE",
+            "title": "Cause Code"
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Simulation seconds until it is cancelled; null = until cancelled",
+            "title": "Duration S"
+          },
+          "information_quality": {
+            "default": 7,
+            "maximum": 7.0,
+            "minimum": 0.0,
+            "title": "Information Quality",
+            "type": "integer"
+          },
+          "relevance_distance_m": {
+            "default": 150.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000.0,
+            "title": "Relevance Distance M",
+            "type": "number"
+          },
+          "station_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Originating station (a V2X vehicle's actor id or -intersection_id of an RSU); null = a fixed roadside transmitter at the event",
+            "title": "Station Id"
+          },
+          "subcause_code": {
+            "default": 0,
+            "maximum": 255.0,
+            "minimum": 0.0,
+            "title": "Subcause Code",
+            "type": "integer"
+          },
+          "x": {
+            "description": "CARLA world x of the event, metres",
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "description": "CARLA world y of the event, metres",
+            "title": "Y",
+            "type": "number"
+          },
+          "z": {
+            "default": 0.0,
+            "title": "Z",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "DenmRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HazardRequest": {
+        "properties": {
+          "cause_code": {
+            "default": 10,
+            "description": "ETSI cause code; 10 = obstacle on road, 2 = accident, 3 = road works",
+            "maximum": 255.0,
+            "minimum": 0.0,
+            "title": "Cause Code",
+            "type": "integer"
+          },
+          "duration_s": {
+            "default": 30.0,
+            "description": "Simulation seconds the warning stays valid",
+            "exclusiveMinimum": 0.0,
+            "maximum": 3600.0,
+            "title": "Duration S",
+            "type": "number"
+          },
+          "relevance_distance_m": {
+            "default": 150.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 2000.0,
+            "title": "Relevance Distance M",
+            "type": "number"
+          },
+          "tx_power_dbm": {
+            "anyOf": [
+              {
+                "maximum": 46.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default 33 dBm (roadside unit)",
+            "title": "Tx Power Dbm"
+          },
+          "x": {
+            "description": "CARLA world x of the hazard (metres)",
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "description": "CARLA world y of the hazard (metres)",
+            "title": "Y",
+            "type": "number"
+          },
+          "z": {
+            "default": 0.0,
+            "title": "Z",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "HazardRequest",
+        "type": "object"
+      },
+      "JoinRequest": {
+        "properties": {
+          "client_name": {
+            "description": "Friendly name shown in the admin panel (e.g. 'raspi-1')",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Client Name",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 10.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session lifetime in seconds. Omit or set null to run until the client leaves or has had no connection for longer than session_disconnect_grace_s.",
+            "title": "Duration Seconds"
+          },
+          "enable_lidar": {
+            "default": false,
+            "description": "Attach a LiDAR sensor and open /ws/lidar/{session_id} for binary streaming.",
+            "title": "Enable Lidar",
+            "type": "boolean"
+          },
+          "vehicle_blueprint": {
+            "default": "vehicle.tesla.model3",
+            "description": "CARLA blueprint ID for the leading vehicle",
+            "title": "Vehicle Blueprint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_name"
+        ],
+        "title": "JoinRequest",
+        "type": "object"
+      },
+      "JoinResponse": {
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "integer"
+          },
+          "lidar_error": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lidar Error"
+          },
+          "lidar_ws_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lidar Ws Url"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "session_token": {
+            "title": "Session Token",
+            "type": "string"
+          },
+          "ws_url": {
+            "title": "Ws Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "session_token",
+          "actor_id",
+          "ws_url",
+          "message"
+        ],
+        "title": "JoinResponse",
+        "type": "object"
+      },
+      "LidarConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "atmosphere_attenuation_rate": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Atmosphere Attenuation Rate"
+          },
+          "channels": {
+            "default": 32,
+            "maximum": 256.0,
+            "minimum": 1.0,
+            "title": "Channels",
+            "type": "integer"
+          },
+          "dropoff_general_rate": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropoff General Rate"
+          },
+          "dropoff_intensity_limit": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropoff Intensity Limit"
+          },
+          "dropoff_zero_intensity": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropoff Zero Intensity"
+          },
+          "horizontal_fov_deg": {
+            "default": 360.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 360.0,
+            "title": "Horizontal Fov Deg",
+            "type": "number"
+          },
+          "lower_fov_deg": {
+            "default": -30.0,
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lower Fov Deg",
+            "type": "number"
+          },
+          "mount": {
+            "$ref": "#/components/schemas/Mount"
+          },
+          "noise_stddev": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Noise Stddev"
+          },
+          "points_per_second": {
+            "default": 500000,
+            "maximum": 10000000.0,
+            "minimum": 1000.0,
+            "title": "Points Per Second",
+            "type": "integer"
+          },
+          "range_m": {
+            "default": 100.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 300.0,
+            "title": "Range M",
+            "type": "number"
+          },
+          "rotation_frequency_hz": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 100.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rotation Frequency Hz"
+          },
+          "sensor_type": {
+            "default": "ray_cast_semantic",
+            "enum": [
+              "ray_cast_semantic",
+              "ray_cast"
+            ],
+            "title": "Sensor Type",
+            "type": "string"
+          },
+          "upper_fov_deg": {
+            "default": 15.0,
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Upper Fov Deg",
+            "type": "number"
+          }
+        },
+        "title": "LidarConfig",
+        "type": "object"
+      },
+      "Mount": {
+        "additionalProperties": false,
+        "description": "Sensor pose relative to the vehicle (CARLA frame: x forward, y right, z up; degrees).",
+        "properties": {
+          "pitch_deg": {
+            "default": 0.0,
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Pitch Deg",
+            "type": "number"
+          },
+          "roll_deg": {
+            "default": 0.0,
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Roll Deg",
+            "type": "number"
+          },
+          "x_m": {
+            "default": 0.0,
+            "maximum": 10.0,
+            "minimum": -10.0,
+            "title": "X M",
+            "type": "number"
+          },
+          "y_m": {
+            "default": 0.0,
+            "maximum": 10.0,
+            "minimum": -10.0,
+            "title": "Y M",
+            "type": "number"
+          },
+          "yaw_deg": {
+            "default": 0.0,
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Yaw Deg",
+            "type": "number"
+          },
+          "z_m": {
+            "default": 2.4,
+            "maximum": 10.0,
+            "minimum": -1.0,
+            "title": "Z M",
+            "type": "number"
+          }
+        },
+        "title": "Mount",
+        "type": "object"
+      },
+      "PedestrianRequest": {
+        "properties": {
+          "count": {
+            "default": 15,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "title": "PedestrianRequest",
+        "type": "object"
+      },
+      "RsuPatch": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "tx_power_dbm": {
+            "anyOf": [
+              {
+                "maximum": 40.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tx Power Dbm"
+          }
+        },
+        "title": "RsuPatch",
+        "type": "object"
+      },
+      "SensorFlags": {
+        "properties": {
+          "pinned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned"
+          },
+          "record_raw": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Raw"
+          }
+        },
+        "title": "SensorFlags",
+        "type": "object"
+      },
+      "SensorRequest": {
+        "properties": {
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Vehicle to attach to; a vehicle session may omit it (own vehicle)",
+            "title": "Actor Id"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LidarConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pinned": {
+            "default": false,
+            "description": "Never auto-release without viewers (admin)",
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "record_raw": {
+            "default": false,
+            "description": "Keep the sensor alive and record its raw frames in a run (admin)",
+            "title": "Record Raw",
+            "type": "boolean"
+          }
+        },
+        "title": "SensorRequest",
+        "type": "object"
+      },
+      "TrafficRequest": {
+        "properties": {
+          "count": {
+            "default": 20,
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "title": "TrafficRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "src__server__admin_routes__RunRequest": {
+        "properties": {
+          "name": {
+            "default": "run",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "record_lidar": {
+            "default": false,
+            "description": "Also write every LiDAR frame at full resolution (large).",
+            "title": "Record Lidar",
+            "type": "boolean"
+          },
+          "record_links": {
+            "default": true,
+            "description": "Write one record per V2X transmission attempt.",
+            "title": "Record Links",
+            "type": "boolean"
+          }
+        },
+        "title": "RunRequest",
+        "type": "object"
+      },
+      "src__server__api_routes__RunRequest": {
+        "properties": {
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hot configuration fields applied before the run starts",
+            "title": "Config"
+          },
+          "name": {
+            "description": "Shown in the run id and the manifest",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "record": {
+            "description": "links, stations, messages, lidar_meta, raw_lidar",
+            "items": {
+              "type": "string"
+            },
+            "title": "Record",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RunRequest",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "CARLA V2X + LiDAR Server",
+    "version": "0.1.0",
+    "x-generated-with": {
+      "fastapi": "0.141.1",
+      "pydantic": "2.13.5"
+    }
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/admin/connect": {
+      "post": {
+        "description": "Start (or restart) the persistent CARLA world.\n\nCall this from the admin panel to connect to a CARLA server at any IP.\nSafe to call again if the world is already running \u2014 stops the old one first.\nA second request while a connect is in progress is rejected with 409.",
+        "operationId": "connect_world_admin_connect_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Connect to CARLA and start world",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/pedestrians": {
+      "delete": {
+        "description": "Destroy all admin-spawned pedestrians. Returns 0 when world not started.",
+        "operationId": "clear_pedestrians_admin_pedestrians_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear pedestrians",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "Spawn AI-controlled pedestrians.",
+        "operationId": "spawn_pedestrians_admin_pedestrians_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PedestrianRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Spawn pedestrians",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/runs": {
+      "get": {
+        "operationId": "list_runs_endpoint_admin_runs_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Current recording and finished runs",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "Write frame-stamped, full-resolution data to ``runs/<UTC>_<sha>_<name>/`` until stopped.\n\nFiles: ``manifest.json`` (settings, seeds, versions), ``events.jsonl``, ``stations.jsonl`` (ground truth every V2X update),\n``v2x_links.jsonl`` (channel decision per attempt), optional raw LiDAR.",
+        "operationId": "start_run_admin_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/src__server__admin_routes__RunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start recording a run",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/runs/current/stop": {
+      "post": {
+        "operationId": "stop_run_admin_runs_current_stop_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop the current recording",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/sessions": {
+      "get": {
+        "description": "Return all sessions (active and ended). Returns [] when world is not started.",
+        "operationId": "list_sessions_admin_sessions_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "All client sessions",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/sessions/{session_id}": {
+      "delete": {
+        "description": "Force-end a session and despawn the client vehicle.",
+        "operationId": "kick_session_admin_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Kick a client",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/status": {
+      "get": {
+        "description": "Return world-level status \u2014 works even before connect (world=None).",
+        "operationId": "admin_status_admin_status_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "World status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/stop": {
+      "post": {
+        "description": "Gracefully stop the persistent world (tick loop + actor cleanup).",
+        "operationId": "stop_world_admin_stop_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop the CARLA server",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/traffic": {
+      "delete": {
+        "description": "Destroy all admin-spawned background vehicles. Returns 0 when world not started.",
+        "operationId": "clear_traffic_admin_traffic_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear background traffic",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "Spawn autopilot background vehicles.",
+        "operationId": "spawn_traffic_admin_traffic_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrafficRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Spawn background traffic",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v2x/hazards": {
+      "get": {
+        "operationId": "list_hazards_admin_v2x_hazards_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Active hazard warnings",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "The warning is sent through the DSRC channel every V2X update; a vehicle only reacts if it RECEIVED it\n(see ``GET /admin/v2x/links?msg_type=DENM``). Needs V2X enabled.",
+        "operationId": "publish_hazard_admin_v2x_hazards_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HazardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Place a hazard warning (DENM)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v2x/hazards/{station_id}": {
+      "delete": {
+        "operationId": "clear_hazard_admin_v2x_hazards__station_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "station_id",
+            "required": true,
+            "schema": {
+              "title": "Station Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel a hazard warning",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v2x/links": {
+      "get": {
+        "description": "One record per (transmitter, receiver, message) attempt, with the full channel decision.\n\nFilter by ``msg_type`` (BSM, MAP, SPAT, VRUAM), ``rx_id`` and ``delivered``; ``summary`` counts\nall matching records, ``links`` is truncated to ``limit``.",
+        "operationId": "list_links_admin_v2x_links_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "msg_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Msg Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rx_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rx Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delivered",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Delivered"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Per-link channel results of the last V2X update",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v2x/rsus": {
+      "get": {
+        "description": "Return all RSUs registered in the V2X network.",
+        "operationId": "list_rsus_admin_v2x_rsus_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List registered RSUs",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v2x/spat": {
+      "get": {
+        "description": "Return current Signal Phase and Timing (SPAT) messages from all RSUs.",
+        "operationId": "list_spat_admin_v2x_spat_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Current SPAT messages",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/v2x/vrus": {
+      "get": {
+        "description": "Return all active VRU VRUAM messages from the V2X network.",
+        "operationId": "list_vrus_admin_v2x_vrus_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List active VRUs",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/config": {
+      "get": {
+        "operationId": "get_config_api_config_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The resolved configuration of the running world",
+        "tags": [
+          "api"
+        ]
+      },
+      "patch": {
+        "description": "Body: ``{\"field\": value, ...}`` with fields marked ``x-apply: hot`` in /api/config/schema. All or nothing; every\nchange becomes an event with the frame at which it was applied. Fields that need a restart answer 409.",
+        "operationId": "patch_config_api_config_patch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Changes",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change hot configuration fields of the running world (admin)",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/config/schema": {
+      "get": {
+        "operationId": "get_config_schema_api_config_schema_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "JSON schema of the configuration (for forms)",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/hub/connections": {
+      "get": {
+        "operationId": "hub_connections_api_hub_connections_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "WebSocket clients and their subscriptions (admin)",
+        "tags": [
+          "hub"
+        ]
+      }
+    },
+    "/api/lidar/schema": {
+      "get": {
+        "operationId": "get_schema_api_lidar_schema_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "What can be configured per sensor type, the semantic tag table and the limits",
+        "tags": [
+          "lidar"
+        ]
+      }
+    },
+    "/api/lidar/sensors": {
+      "get": {
+        "operationId": "list_sensors_api_lidar_sensors_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "LiDAR sensors and the budget",
+        "tags": [
+          "lidar"
+        ]
+      },
+      "post": {
+        "operationId": "create_sensor_api_lidar_sensors_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SensorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request a sensor (admin: any vehicle; vehicle: its own)",
+        "tags": [
+          "lidar"
+        ]
+      }
+    },
+    "/api/lidar/sensors/{sensor_id}": {
+      "delete": {
+        "operationId": "release_sensor_api_lidar_sensors__sensor_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sensor_id",
+            "required": true,
+            "schema": {
+              "title": "Sensor Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release a sensor",
+        "tags": [
+          "lidar"
+        ]
+      },
+      "get": {
+        "operationId": "get_sensor_api_lidar_sensors__sensor_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sensor_id",
+            "required": true,
+            "schema": {
+              "title": "Sensor Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "One sensor",
+        "tags": [
+          "lidar"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_sensor_api_lidar_sensors__sensor_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sensor_id",
+            "required": true,
+            "schema": {
+              "title": "Sensor Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SensorFlags"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pin a sensor / mark it for raw recording (admin)",
+        "tags": [
+          "lidar"
+        ]
+      },
+      "put": {
+        "operationId": "reconfigure_sensor_api_lidar_sensors__sensor_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sensor_id",
+            "required": true,
+            "schema": {
+              "title": "Sensor Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LidarConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconfigure a sensor (destroyed and respawned at a tick boundary)",
+        "tags": [
+          "lidar"
+        ]
+      }
+    },
+    "/api/map/geometry": {
+      "get": {
+        "operationId": "get_map_geometry_api_map_geometry_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Road network: lane polylines and junction boxes",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/runs": {
+      "get": {
+        "operationId": "list_runs_api_runs_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recorded runs and the active one (admin)",
+        "tags": [
+          "api"
+        ]
+      },
+      "post": {
+        "operationId": "start_run_api_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/src__server__api_routes__RunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start recording a run (admin)",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/runs/current/stop": {
+      "post": {
+        "operationId": "stop_run_api_runs_current_stop_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop the active run (admin)",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/runs/{run_id}/manifest": {
+      "get": {
+        "operationId": "run_manifest_api_runs__run_id__manifest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The manifest of a run (admin)",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/sessions/{session_id}/lidar": {
+      "delete": {
+        "operationId": "delete_session_sensor_api_sessions__session_id__lidar_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release the session's sensor",
+        "tags": [
+          "lidar"
+        ]
+      },
+      "get": {
+        "operationId": "get_session_sensor_api_sessions__session_id__lidar_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The LiDAR sensor of a session (its vehicle or the admin)",
+        "tags": [
+          "lidar"
+        ]
+      },
+      "post": {
+        "operationId": "create_session_sensor_api_sessions__session_id__lidar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LidarConfig"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Config"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request a sensor on the session's own vehicle (an existing one is reconfigured)",
+        "tags": [
+          "lidar"
+        ]
+      },
+      "put": {
+        "operationId": "put_session_sensor_api_sessions__session_id__lidar_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-session-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Session-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LidarConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconfigure the session's sensor (requested if it has none)",
+        "tags": [
+          "lidar"
+        ]
+      }
+    },
+    "/api/status": {
+      "get": {
+        "description": "Is CARLA connected, which map, which frame; ``connected: false`` before /admin/connect.",
+        "operationId": "get_status_api_status_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Server status (public)",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/topics": {
+      "get": {
+        "operationId": "list_topics_api_topics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "WebSocket topics, who may subscribe and which filter they need",
+        "tags": [
+          "hub"
+        ]
+      }
+    },
+    "/api/v2x/denm": {
+      "get": {
+        "operationId": "list_denm_api_v2x_denm_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "DENMs in the last V2X update",
+        "tags": [
+          "api"
+        ]
+      },
+      "post": {
+        "operationId": "inject_denm_api_v2x_denm_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DenmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inject a DENM at a map position (admin)",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v2x/denm/{station_id}/{action_id}": {
+      "delete": {
+        "operationId": "cancel_denm_api_v2x_denm__station_id___action_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "station_id",
+            "required": true,
+            "schema": {
+              "title": "Station Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "title": "Action Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel a DENM (admin)",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v2x/rsus": {
+      "get": {
+        "operationId": "list_rsus_api_v2x_rsus_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "RSUs: position, power, range, enabled",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v2x/rsus/{station_id}": {
+      "patch": {
+        "operationId": "patch_rsu_api_v2x_rsus__station_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "station_id",
+            "required": true,
+            "schema": {
+              "title": "Station Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-admin-token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RsuPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enable/disable an RSU or change its transmit power (admin)",
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/client/blueprints": {
+      "get": {
+        "operationId": "get_blueprints_client_blueprints_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Available vehicle blueprints",
+        "tags": [
+          "client"
+        ]
+      }
+    },
+    "/client/join": {
+      "post": {
+        "description": "Register a client device.  Spawns a leading vehicle immediately and\nreturns the session_id and the WebSocket URL for telemetry streaming.",
+        "operationId": "join_server_client_join_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JoinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Join the live server",
+        "tags": [
+          "client"
+        ]
+      }
+    },
+    "/client/leave/{session_id}": {
+      "delete": {
+        "description": "Gracefully end a session and despawn the leading vehicle.",
+        "operationId": "leave_server_client_leave__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Leave the server",
+        "tags": [
+          "client"
+        ]
+      }
+    },
+    "/client/lidar/schema": {
+      "get": {
+        "operationId": "lidar_schema_endpoint_client_lidar_schema_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Valid LiDAR settings per sensor type",
+        "tags": [
+          "client"
+        ]
+      }
+    },
+    "/client/lidar/{session_id}": {
+      "delete": {
+        "operationId": "delete_lidar_client_lidar__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release this session's LiDAR",
+        "tags": [
+          "client"
+        ]
+      },
+      "get": {
+        "operationId": "get_lidar_client_lidar__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "State of this session's LiDAR sensor",
+        "tags": [
+          "client"
+        ]
+      },
+      "put": {
+        "operationId": "put_lidar_client_lidar__session_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LidarConfig",
+                "default": {
+                  "channels": 32,
+                  "horizontal_fov_deg": 360.0,
+                  "lower_fov_deg": -30.0,
+                  "mount": {
+                    "pitch_deg": 0.0,
+                    "roll_deg": 0.0,
+                    "x_m": 0.0,
+                    "y_m": 0.0,
+                    "yaw_deg": 0.0,
+                    "z_m": 2.4
+                  },
+                  "points_per_second": 500000,
+                  "range_m": 100.0,
+                  "sensor_type": "ray_cast_semantic",
+                  "upper_fov_deg": 15.0
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request or reconfigure this session's LiDAR (applied at the next tick boundary)",
+        "tags": [
+          "client"
+        ]
+      }
+    },
+    "/client/vehicle/{session_id}": {
+      "get": {
+        "description": "One-shot telemetry poll (for clients that can't use WebSocket).",
+        "operationId": "get_vehicle_state_client_vehicle__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get vehicle telemetry (REST)",
+        "tags": [
+          "client"
+        ]
+      }
+    }
+  }
+}

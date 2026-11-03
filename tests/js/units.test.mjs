@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as u from '../../src/web/static/js/units.js';
+import * as u from '../../src/visualization/web/static/js/units.js';
 
 test('numbers are rounded for display only, missing values are an em dash', () => {
   assert.equal(u.metres(12.3456), '12.3 m');

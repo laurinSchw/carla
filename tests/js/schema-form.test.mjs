@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fieldsFromJsonSchema, fieldsFromLidarSchema, validateField, valuesToConfig, configToValues, validateAll } from '../../src/web/static/js/schema-form.js';
+import { fieldsFromJsonSchema, fieldsFromLidarSchema, validateField, valuesToConfig, configToValues, validateAll } from '../../src/visualization/web/static/js/schema-form.js';
 
 const dir = process.env.JS_FIXTURES;
 const world = dir ? JSON.parse(readFileSync(join(dir, 'world_config_schema.json'), 'utf8')) : null;

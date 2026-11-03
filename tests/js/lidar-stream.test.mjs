@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LidarStream } from '../../src/web/static/js/lidar-stream.js';
+import { LidarStream } from '../../src/visualization/web/static/js/lidar-stream.js';
 
 class FakeWS {
   static all = [];

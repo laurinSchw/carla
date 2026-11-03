@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Api, ApiError, describeDetail } from '../../src/web/static/js/api.js';
+import { Api, ApiError, describeDetail } from '../../src/visualization/web/static/js/api.js';
 
 function fakeFetch(responses) {
   const calls = [];

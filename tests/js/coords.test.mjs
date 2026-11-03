@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import {
   basisVectors, transformMatrix, toWorld, toSensor, carlaToThree, createViewport, worldToScreen, screenToWorld,
   yawToCanvasAngle, zoomAt, fitBounds,
-} from '../../src/web/static/js/coords.js';
+} from '../../src/visualization/web/static/js/coords.js';
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} != ${b}`);
 const fixtures = process.env.JS_FIXTURES ? JSON.parse(readFileSync(join(process.env.JS_FIXTURES, 'coords.json'), 'utf8')) : null;

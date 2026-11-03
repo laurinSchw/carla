@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from src.recording.recorder import DEFAULT_RECORD, RunAlreadyRecording
 from src.server.admin_routes import check_admin_token
+from src.server.api_ops import RestartRequiredError
 from src.server.route_utils import on_sim_thread
 from src.server.world_config import HOT_FIELDS, config_schema
 from src.v2x.safety_messages import DENMCauseCode
@@ -87,7 +88,7 @@ async def patch_config(changes: Dict[str, Any], x_admin_token: str = Header(...)
     world = _ready()
     try:
         return await on_sim_thread(world, lambda: world.apply_config(changes))
-    except PermissionError as exc:
+    except RestartRequiredError as exc:
         raise HTTPException(status_code=409, detail={"error": "restart_required", "message": str(exc),
                                                      "hot_fields": sorted(HOT_FIELDS)})
     except ValueError as exc:                                  # unknown field or a value the configuration rules reject
@@ -204,8 +205,10 @@ async def start_run(req: RunRequest, x_admin_token: str = Header(...)):
         return await on_sim_thread(world, lambda: world.start_run_api(req.name, req.record, req.config))
     except RunAlreadyRecording as exc:
         raise HTTPException(status_code=409, detail={"error": "run_active", "message": str(exc)})
-    except PermissionError as exc:
+    except RestartRequiredError as exc:
         raise HTTPException(status_code=409, detail={"error": "restart_required", "message": str(exc)})
+    except OSError as exc:                                     # e.g. runs/ not writable (owned by root after a container run)
+        raise HTTPException(status_code=503, detail={"error": "storage", "message": f"cannot create the run directory: {exc}"})
     except ValueError as exc:
         errors = getattr(exc, "errors", None)
         raise HTTPException(status_code=422, detail=errors(include_url=False, include_context=False) if callable(errors) else str(exc))

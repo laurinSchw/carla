@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Protocol, Tuple
 
@@ -164,10 +164,13 @@ class Sensor:
     pending_config: Optional[LidarConfig] = None
     handle: Optional[LidarHandle] = None
     no_viewers_since: Optional[float] = None
+    #: shown as ``owner`` in the published info (e.g. the client name); ``owner`` itself is the ownership key (a session
+    #: id) and is never published: it is what the unauthenticated /client routes act on
+    label: Optional[str] = None
 
     def info(self, dt: float) -> dict:
         return {
-            "sensor_id": self.sensor_id, "actor_id": self.actor_id, "owner": self.owner,
+            "sensor_id": self.sensor_id, "actor_id": self.actor_id, "owner": self.label or self.owner,
             "state": self.state.value, "error": self.error, "config": self.config.model_dump(),
             "viewers": self.viewers, "pinned": self.pinned, "record_raw": self.record_raw,
             "points_per_frame": self.config.points_per_frame(dt),
@@ -213,6 +216,7 @@ class LidarManager:
 
         # published for other threads: replaced, never mutated
         self._published: Tuple[dict, ...] = ()
+        self._published_owners: Tuple[Tuple[str, dict], ...] = ()   # (ownership key, info): not for clients
         self._published_budget: dict = {}
         self.info_version = 0  # increases with every change of the published sensor list (the hub pushes on change)
         self._latest: Dict[int, LidarFrame] = {}
@@ -236,15 +240,17 @@ class LidarManager:
         own_actor_id: Optional[int] = None,
         record_raw: bool = False,
         pinned: bool = False,
+        label: Optional[str] = None,
     ) -> Sensor:
-        """Ask for a sensor on ``actor_id``. Vehicle sessions may only use their own actor; ``pinned`` is admin-only."""
+        """Ask for a sensor on ``actor_id``. Vehicle sessions may only use their own actor; ``pinned`` is admin-only
+        (``record_raw`` is checked by the caller). ``label`` is what the published info shows as the owner (default: ``owner``)."""
         if not is_admin and actor_id != own_actor_id:
             raise LidarPermissionError("a vehicle may only attach a LiDAR to its own actor", actor_id=actor_id)
         if pinned and not is_admin:
             raise LidarPermissionError("only an admin may pin a sensor")
         cfg = self._resolve(config or LidarConfig())
         self._check_budget(cfg, replacing=None)
-        sensor = Sensor(self._next_id, actor_id, owner, cfg, record_raw, pinned, created_frame=self._frame)
+        sensor = Sensor(self._next_id, actor_id, owner, cfg, record_raw, pinned, created_frame=self._frame, label=label)
         self._next_id += 1
         self._sensors[sensor.sensor_id] = sensor
         self._event(sensor, "new sensor")
@@ -269,6 +275,25 @@ class LidarManager:
         self._check_owner(sensor, requester, is_admin)
         self._begin_stop(sensor, "released by request")
 
+    def set_flags(self, sensor_id: int, *, pinned: Optional[bool] = None, record_raw: Optional[bool] = None) -> Sensor:
+        """Pin a sensor (no auto-release) or mark it for raw recording. Admin-only: the caller checks the role."""
+        sensor = self._get(sensor_id)
+        if sensor.state in (State.STOPPING, State.DESTROYED):
+            raise LidarBusy(f"sensor is {sensor.state.value}", state=sensor.state.value)
+        changed = []
+        if pinned is not None and pinned != sensor.pinned:
+            sensor.pinned = pinned
+            changed.append(f"pinned={pinned}")
+        if record_raw is not None and record_raw != sensor.record_raw:
+            sensor.record_raw = record_raw
+            changed.append(f"record_raw={record_raw}")
+        if changed:
+            if not (sensor.pinned or sensor.record_raw) and sensor.viewers == 0:
+                sensor.no_viewers_since = self._mono()   # the keep-alive starts now, not at the last viewer of long ago
+            self._event(sensor, "flags " + ", ".join(changed))
+            self._publish()
+        return sensor
+
     def release_owner(self, owner: str, reason: str = "owner session ended") -> int:
         n = 0
         for sensor in list(self._sensors.values()):
@@ -282,19 +307,24 @@ class LidarManager:
 
         Needed when the attached vehicle is about to be destroyed: stop the sensor first, then its parent.
         """
-        n = 0
-        for sensor in list(self._sensors.values()):
-            if sensor.owner == owner and sensor.state is not State.DESTROYED:
-                self._destroy_handle(sensor)
-                self._set_state(sensor, State.DESTROYED, reason)
-                del self._sensors[sensor.sensor_id]
-                self._latest = {k: v for k, v in self._latest.items() if k != sensor.sensor_id}
-                self._due = {k: v for k, v in self._due.items() if k != sensor.sensor_id}
-                self._hash_cache.pop(sensor.sensor_id, None)
-                n += 1
-        if n:
-            self._publish()
-        return n
+        return sum(self.destroy_sensor_now(s.sensor_id, reason) for s in list(self._sensors.values()) if s.owner == owner)
+
+    def destroy_actor_now(self, actor_id: int, reason: str = "vehicle despawned") -> int:
+        """Destroy every sensor attached to ``actor_id`` now (whoever owns it): call before destroying the actor."""
+        return sum(self.destroy_sensor_now(s.sensor_id, reason) for s in list(self._sensors.values()) if s.actor_id == actor_id)
+
+    def destroy_sensor_now(self, sensor_id: int, reason: str) -> int:
+        sensor = self._sensors.get(sensor_id)
+        if sensor is None or sensor.state is State.DESTROYED:
+            return 0
+        self._destroy_handle(sensor)
+        self._set_state(sensor, State.DESTROYED, reason)
+        del self._sensors[sensor_id]
+        self._latest = {k: v for k, v in self._latest.items() if k != sensor_id}
+        self._due = {k: v for k, v in self._due.items() if k != sensor_id}
+        self._hash_cache.pop(sensor_id, None)
+        self._publish()
+        return 1
 
     def release_actor(self, actor_id: int, reason: str = "vehicle gone") -> int:
         n = 0
@@ -415,8 +445,12 @@ class LidarManager:
 
     def sensor_of_owner(self, owner: str) -> Optional[dict]:
         """The owner's live sensor (one that is stopping does not count: a new request replaces it)."""
-        return next((i for i in self._published
-                     if i["owner"] == owner and i["state"] not in (State.STOPPING.value, State.DESTROYED.value)), None)
+        return next((i for o, i in self._published_owners
+                     if o == owner and i["state"] not in (State.STOPPING.value, State.DESTROYED.value)), None)
+
+    def owner_of(self, sensor_id: int) -> Optional[str]:
+        """Ownership key of a published sensor (a session id or "admin"); for permission checks, never for clients."""
+        return next((o for o, i in self._published_owners if i["sensor_id"] == sensor_id), None)
 
     def budget(self) -> dict:
         """Budget as published after the last change (safe from any thread); the simulation thread uses ``_budget_now``."""
@@ -448,10 +482,20 @@ class LidarManager:
         unlucky phase still gets every n-th frame. The bytes are produced once per (sensor, frame, profile) and shared by
         all viewers on that profile. May be called from any thread (encoding is serialised by a lock).
         """
+        got = self.get_stream_frame_counted(sensor_id, profile, after_frame)
+        return None if got is None else (got[0], got[1])
+
+    def get_stream_frame_counted(
+        self, sensor_id: int, profile: StreamProfile = StreamProfile(), after_frame: int = -1
+    ) -> Optional[Tuple[int, bytes, int, int]]:
+        """Like ``get_stream_frame`` plus ``(points_total, points_sent)``: how many points the measurement had and how many the
+        encoded frame carries (fewer when the profile subsamples for display)."""
         n = max(1, profile.every_n_frames)
         lf = self._due.get(sensor_id, {}).get(n) if n <= MAX_STREAM_DIVISOR else self._latest.get(sensor_id)
         if lf is None or lf.frame <= after_frame or (n > MAX_STREAM_DIVISOR and lf.frame % n != 0):
             return None
+        total = len(lf.measurement.points)
+        sent = total if profile.max_points is None else min(total, profile.max_points)
         key = (sensor_id, lf.frame, profile)
         with self._cache_lock:
             data = self._encoded.get(key)
@@ -460,7 +504,7 @@ class LidarManager:
                 # keep only this sensor's newest frames; other sensors' cached entries are not ours to evict
                 self._encoded = {k: v for k, v in self._encoded.items() if k[0] != sensor_id or k[1] == lf.frame}
                 self._encoded[key] = data
-        return lf.frame, data
+        return lf.frame, data, total, sent
 
     # -- internals -------------------------------------------------------------------------------
     def _encode(self, lf: LidarFrame, profile: StreamProfile) -> bytes:
@@ -507,6 +551,7 @@ class LidarManager:
         if count + 1 > self.limits.max_sensors or cfg.points_per_second > available:
             raise LidarBudgetExceeded(
                 "LiDAR budget exceeded",
+                reason="max_sensors" if count + 1 > self.limits.max_sensors else "points_per_second",
                 requested_pps=cfg.points_per_second, available_pps=max(available, 0),
                 sensors=count, max_sensors=self.limits.max_sensors,
             )
@@ -559,6 +604,8 @@ class LidarManager:
             del self.events[:1000]
 
     def _publish(self) -> None:
-        self._published = tuple(s.info(self.dt) for s in list(self._sensors.values()))
+        owned = tuple((s.owner, s.info(self.dt)) for s in list(self._sensors.values()))
+        self._published_owners = owned
+        self._published = tuple(i for _, i in owned)
         self._published_budget = self._budget_now()
         self.info_version += 1

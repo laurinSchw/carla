@@ -49,6 +49,7 @@ from src.traffic.drivers import DriverAssigner, DriverProfile, apply_profile
 from src.recording.recorder import RunAlreadyRecording, RunRecorder, list_runs
 from src.server.route_utils import ConflictError
 from src.server.api_ops import ApiOpsMixin
+from src.server.lidar_ops import LidarOpsMixin
 from src.server.hub_views import HubViewsMixin
 from src.server.session_manager import SessionManager
 from src.server.sim_executor import SimThreadExecutor
@@ -89,7 +90,7 @@ def _git_sha() -> str:
     return _GIT_SHA
 
 
-class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
+class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin, LidarOpsMixin):
     """
     Manages a persistent CARLA world that runs indefinitely.
 
@@ -152,6 +153,10 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
         self._start_time: Optional[float] = None
         self._last_v2x_frame = 0
         self._last_session_check_frame = 0
+        # headless runs (src/scenario.py): start paused, run callbacks just before a given tick, no real-time pacing
+        self._paused = False
+        self._tick_index = 0                                   # ticks done by this server since start()
+        self._scheduled: Dict[int, List[Callable[[], Any]]] = {}
 
         # Published, immutable-by-convention snapshots read by other threads.
         # A reader sees either the previous or the next dict, never a half-built one.
@@ -184,14 +189,44 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
     def _tick(self) -> None:
         """The only place that ticks the world; ``_frame`` follows CARLA's own frame id."""
         self._frame = self.world.tick()
+        self._tick_index += 1
+
+    @property
+    def tick_index(self) -> int:
+        """Number of ticks this server has done since start() (the clock of ``at_tick``)."""
+        return self._tick_index
+
+    def at_tick(self, index: int, fn: Callable[[], Any]) -> None:
+        """Run ``fn`` on the simulation thread just before tick number ``index`` (after submitted work of that
+        boundary). Frame-exact, so a scripted command happens at the same frame in every run. Simulation thread only
+        (call it from submitted work, or before start())."""
+        if self._tick_thread is not None:
+            self._require_sim_thread()
+        if index < self._tick_index:
+            raise ValueError(f"tick {index} has already happened (now at {self._tick_index})")
+        self._scheduled.setdefault(int(index), []).append(fn)
+
+    def _run_scheduled(self) -> None:
+        for fn in self._scheduled.pop(self._tick_index, ()):
+            try:
+                fn()
+            except Exception as exc:
+                logger.exception("scheduled command failed before tick %d", self._tick_index)
+                self._record_event("scheduled_command_failed", tick_index=self._tick_index, error=repr(exc))
+
+    def resume(self) -> None:
+        """Release a world started with ``start(paused=True)``."""
+        self._paused = False
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                            #
     # ------------------------------------------------------------------ #
 
-    def start(self) -> None:
-        """Connect to CARLA, apply settings, start the simulation thread."""
+    def start(self, paused: bool = False) -> None:
+        """Connect to CARLA, apply settings, start the simulation thread. ``paused``: the thread runs submitted work but
+        does not tick until ``resume()`` (headless scenarios set up and start recording before the first tick)."""
         cfg = self.config
+        self._paused = paused
         logger.info("Connecting to CARLA at %s:%s", self.host, self.port)
 
         self.client = carla.Client(self.host, self.port)
@@ -343,6 +378,10 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
             tick_start = time.monotonic()
             try:
                 self._exec.drain()  # submitted work runs here, at a frame boundary
+                if self._paused:
+                    time.sleep(0.002)
+                    continue
+                self._run_scheduled()
                 t_a = time.monotonic()
                 self._tick()
                 snapshot = self.world.get_snapshot()
@@ -364,7 +403,7 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
             elapsed = time.monotonic() - tick_start
             self._timing["tick"].append(elapsed * 1000.0)
             sleep_for = self.fixed_delta_seconds - elapsed
-            if sleep_for > 0.001:
+            if self.config.realtime and sleep_for > 0.001:
                 time.sleep(sleep_for)
 
         logger.info("Tick loop stopped at frame %d", self._frame)
@@ -620,6 +659,9 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
             self._driver_of.pop(v.id, None)
             self._advisory.forget(v.id)
         self._record_event("despawn_background_traffic", count=count)
+        if self.lidar is not None:
+            for v in self._background_vehicles:
+                self.lidar.destroy_actor_now(v.id)  # sensors go before their parent vehicle
         batch = [carla.command.DestroyActor(v) for v in self._background_vehicles]
         self.client.apply_batch_sync(batch, False)
         self._background_vehicles.clear()
@@ -793,6 +835,8 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
             self._record_event("client_leave", session_id=session_id)
         if self.lidar is not None:
             self.lidar.destroy_owner_now(session_id)  # stop the sensor before its parent vehicle goes
+            if session_id in self._client_vehicles:  # and sensors others (the admin) put on this vehicle
+                self.lidar.destroy_actor_now(self._client_vehicles[session_id].id)
         actor = self._client_vehicles.pop(session_id, None)
         self._telemetry = {k: v for k, v in self._telemetry.items() if k != session_id}
         self._v2x_payloads = {k: v for k, v in self._v2x_payloads.items() if k != session_id}
@@ -950,15 +994,17 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
     # Run recording (handoff §5.6): simulation thread for start/stop       #
     # ------------------------------------------------------------------ #
 
-    def start_run(self, name: str, record_lidar: bool = False, record_links: bool = True) -> dict:
-        """Start writing a run directory (events, ground-truth stations, V2X link results, optional raw LiDAR)."""
+    def start_run(self, name: str, record_lidar: bool = False, record_links: bool = True,
+                  extra_manifest: Optional[dict] = None) -> dict:
+        """Start writing a run directory (events, ground-truth stations, V2X link results, optional raw LiDAR).
+        ``extra_manifest`` is merged into the manifest (e.g. the scenario of a headless run)."""
         self._require_sim_thread()
         if self.recorder is not None:
             raise RunAlreadyRecording(f"a run is already being recorded: {self.recorder.run_id}")
         from pathlib import Path as _Path
         cfg = self.config
         recorder = RunRecorder(
-            _Path(cfg.runs_dir), name, self._run_manifest(),
+            _Path(cfg.runs_dir), name, {**self._run_manifest(), **(extra_manifest or {})},
             start_frame=self._frame, start_sim_time=self._sim_time,
             git_sha=_git_sha(), record_links=record_links, record_lidar=record_lidar,
         )
@@ -1023,11 +1069,14 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
             "v2x_update_every_n_frames": cfg.v2x_every_n_frames,
             "versions": {"python": platform.python_version(), "numpy": numpy_version,
                          "carla_client": client_version, "carla_server": server_version, "platform": platform.platform()},
+            # a run on src/testing/fake_carla is NOT a CARLA simulation: say so in the data, not only in the log
+            "fake_carla": bool(getattr(carla, "IS_FAKE", False)),
             "reproducibility": {
-                "synchronous_mode": True, "realtime_pacing": True,
-                "note": "the tick loop sleeps to real time, so the timing of admin/client commands relative to frames is not "
-                        "reproducible; same seed + same command frames give the same V2X data only if CARLA and the "
-                        "Traffic Manager are deterministic on this machine (not verified live).",
+                "synchronous_mode": True, "realtime_pacing": cfg.realtime,
+                "note": "with realtime pacing the timing of admin/client commands relative to frames is not reproducible; "
+                        "headless scenarios (src/scenario.py) run commands at fixed tick indices. Same seed + same command "
+                        "frames give the same V2X data only if CARLA and the Traffic Manager are deterministic on this "
+                        "machine (not verified live; on the fake world it is checked by tests/e2e/test_scenarios.py).",
             },
         }
 
@@ -1098,7 +1147,9 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
             if not same:
                 self.lidar.reconfigure(existing["sensor_id"], config, requester=session_id)
             return self.lidar.get_info(existing["sensor_id"])
-        sensor = self.lidar.request(session_id, actor.id, config, own_actor_id=actor.id)
+        session = self.sessions.get_session(session_id)
+        sensor = self.lidar.request(session_id, actor.id, config, own_actor_id=actor.id,
+                                    label=session.client_name if session is not None else None)
         logger.info("LiDAR requested for session %s (actor=%d, sensor=%d)", session_id, actor.id, sensor.sensor_id)
         return self.lidar.get_info(sensor.sensor_id)
 

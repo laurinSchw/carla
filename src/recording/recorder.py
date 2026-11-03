@@ -127,6 +127,8 @@ class RunRecorder:
             "started_utc": started.isoformat(), "started_wall_time_unix": wall_clock(),
             "start_frame": start_frame, "start_sim_time": start_sim_time,
             "record_links": record_links, "record_lidar": record_lidar,
+            **({"lidar_protocol": {"version": protocol.VERSION, "field_layout": protocol.FIELD_LAYOUT_ID}}
+               if record_lidar else {}),
             **manifest,
         }
         self._write_manifest(final=False)

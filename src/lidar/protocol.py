@@ -8,17 +8,22 @@
     Points             ``num_points`` records of ``point_stride_bytes`` each, fields in this fixed order when
                        their ``field_mask`` bit is set:
         bit0 x, y, z        float32 x3
-        bit1 tag            uint8     semantic tag (sensor.lidar.ray_cast_semantic)
-        bit2 object_idx     uint32    hit actor id (exact; the v1/v2 float32 loses ids > 2**24, defect L8)
-        bit3 intensity      float32   (sensor.lidar.ray_cast)
-        bit4 cos_inc        float32   cosine of the incidence angle (semantic)
+        bit1 tag (TAG_U8)   uint8     semantic tag (sensor.lidar.ray_cast_semantic)
+        bit2 tag (TAG_U32)  uint32    semantic tag when one does not fit in a byte (never together with bit1)
+        bit3 object_idx     uint32    hit actor id (exact; the v1/v2 float32 loses ids > 2**24, defect L8)
+        bit4 intensity      float32   (sensor.lidar.ray_cast)
+        bit5 cos_inc        float32   cosine of the incidence angle (semantic)
+
+The bit assignment is the one of the web UI's decoder (``static/js/lidar-decoder.js``, ported from the archived
+branch); until 2026-11-03 this server used tag=bit1, object_idx=bit2, intensity=bit3, cos_inc=bit4 under the same
+version number (see docs/science/CHANGELOG.md; recorded runs say which layout they use in ``manifest.json``).
 
 ``flags``: bit0 = point block is zlib-compressed, bit1 = points are in the WORLD frame,
 bit2 = points are in the SENSOR frame. Exactly one of bit1/bit2 is set; this server sends the sensor frame
 (raw as CARLA delivers it) and the pose, so the client applies the pose and recorded data stays raw.
 
-The Python side is the specification; ``web/static/js/lidar-decoder.js`` (Phase 6) mirrors it and must pass
-the same fixture.
+``src/visualization/web/static/js/lidar-decoder.js`` mirrors it; tests/unit/test_js_modules.py decodes frames made
+here with it.
 """
 
 from __future__ import annotations
@@ -38,11 +43,16 @@ FLAG_WORLD_FRAME = 2
 FLAG_SENSOR_FRAME = 4
 
 FIELD_XYZ = 1
-FIELD_TAG = 2
-FIELD_OBJECT_IDX = 4
-FIELD_INTENSITY = 8
-FIELD_COS_INC = 16
-ALL_FIELDS = FIELD_XYZ | FIELD_TAG | FIELD_OBJECT_IDX | FIELD_INTENSITY | FIELD_COS_INC
+FIELD_TAG_U8 = 2
+FIELD_TAG_U32 = 4
+FIELD_OBJECT_IDX = 8
+FIELD_INTENSITY = 16
+FIELD_COS_INC = 32
+FIELD_TAG = FIELD_TAG_U8
+ALL_FIELDS = FIELD_XYZ | FIELD_TAG_U8 | FIELD_TAG_U32 | FIELD_OBJECT_IDX | FIELD_INTENSITY | FIELD_COS_INC
+
+#: names the field layout in recorded-run manifests (the bit assignment above)
+FIELD_LAYOUT_ID = "xyz=1,tag_u8=2,tag_u32=4,object_idx=8,intensity=16,cos_inc=32"
 
 #: field mask of sensor.lidar.ray_cast_semantic and sensor.lidar.ray_cast measurements
 SEMANTIC_FIELDS = FIELD_XYZ | FIELD_TAG | FIELD_OBJECT_IDX | FIELD_COS_INC
@@ -54,7 +64,8 @@ HEADER_SIZE = _HEADER.size + _POSE.size  # 96
 
 _FIELD_LAYOUT = (
     (FIELD_XYZ, (("x", "<f4"), ("y", "<f4"), ("z", "<f4"))),
-    (FIELD_TAG, (("tag", "u1"),)),
+    (FIELD_TAG_U8, (("tag", "u1"),)),
+    (FIELD_TAG_U32, (("tag", "<u4"),)),
     (FIELD_OBJECT_IDX, (("object_idx", "<u4"),)),
     (FIELD_INTENSITY, (("intensity", "<f4"),)),
     (FIELD_COS_INC, (("cos_inc", "<f4"),)),
@@ -69,6 +80,8 @@ def point_dtype(field_mask: int) -> np.dtype:
     """Packed (no padding) record layout for ``field_mask``."""
     if field_mask & ~ALL_FIELDS or not field_mask & FIELD_XYZ:
         raise ProtocolError(f"invalid field_mask {field_mask:#x}: xyz is mandatory, unknown bits are not allowed")
+    if field_mask & FIELD_TAG_U8 and field_mask & FIELD_TAG_U32:
+        raise ProtocolError(f"invalid field_mask {field_mask:#x}: TAG_U8 and TAG_U32 are mutually exclusive")
     fields = [f for bit, group in _FIELD_LAYOUT if field_mask & bit for f in group]
     return np.dtype(fields)
 

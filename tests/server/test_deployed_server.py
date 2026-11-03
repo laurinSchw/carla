@@ -17,7 +17,7 @@ def test_root_page_ok(server):
     assert status == 200 and "text/html" in ctype and b"CARLA" in body
 
 
-@pytest.mark.parametrize("path", ["/admin", "/client"])
+@pytest.mark.parametrize("path", ["/admin", "/observer", "/vehicle", "/client"])  # /client redirects to /vehicle
 def test_pages_served(server, path):
     status, ctype, body = server.request("GET", path)
     assert status == 200 and "text/html" in ctype and len(body) > 500

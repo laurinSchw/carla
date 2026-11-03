@@ -43,11 +43,37 @@ def _join(client, name="car-1", **extra):
 
 # --- pages --------------------------------------------------------------
 
-@pytest.mark.parametrize("path", ["/", "/admin", "/client"])
+PAGES = {"/": "index.html", "/observer": "observer.html", "/vehicle": "vehicle.html", "/admin": "admin.html"}
+
+
+@pytest.mark.parametrize("path", PAGES)
 def test_pages_return_200_html(client, path):
     r = client.get(path)
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
+    assert r.text == (app_mod.WEB_DIR / PAGES[path]).read_text()
+
+
+def test_old_client_page_redirects_to_the_vehicle_page(client):
+    r = client.get("/client", follow_redirects=False)
+    assert r.status_code in (302, 307) and r.headers["location"] == "/vehicle"
+    assert client.get("/client").text == client.get("/vehicle").text
+
+
+def test_old_pages_are_gone():
+    for name in ("admin_panel.html", "client_join.html"):
+        assert not (app_mod.WEB_DIR / name).exists(), name
+
+
+def test_every_local_script_and_stylesheet_of_the_pages_is_served(client):
+    import re
+    for path in PAGES:
+        html = client.get(path).text
+        refs = re.findall(r'(?:src|href)="(/static/[^"]+)"', html)
+        assert refs, path
+        for ref in refs:
+            r = client.get(ref)
+            assert r.status_code == 200, f"{path} -> {ref}"
 
 
 def test_unknown_page_is_404(client):
@@ -198,13 +224,46 @@ def test_ws_without_world_gets_error(client):
         assert ws.receive_json()["type"] == "error"
 
 
-def test_ws_disconnect_ends_session_and_despawns(client, world):
-    """Current behaviour (handoff C11, decision D4): a WS close ends the session at once."""
+def test_ws_disconnect_keeps_the_session_during_the_grace_period(client, world):
+    """Decision D4: a WS close keeps the vehicle; the simulation thread removes it after the grace period."""
+    world.session_disconnect_grace_s = 30.0
+    sid = _join(client).json()["session_id"]
+    with client.websocket_connect(f"/ws/client/{sid}") as ws:
+        ws.receive_json()
+        assert world.sessions.get_session(sid).ws_connections == 1
+    session = world.sessions.get_session(sid)
+    assert sid not in world.despawned and session.is_active is True and session.ws_connections == 0
+    with client.websocket_connect(f"/ws/client/{sid}") as ws:  # reconnect resumes the same session
+        assert ws.receive_json()["type"] == "telemetry"
+        assert session.ws_connections == 1
+    assert session.is_active is True and sid not in world.despawned
+
+
+def test_ws_disconnect_with_grace_zero_ends_session_and_despawns(client, world):
+    world.session_disconnect_grace_s = 0.0
     sid = _join(client).json()["session_id"]
     with client.websocket_connect(f"/ws/client/{sid}") as ws:
         ws.receive_json()
     assert sid in world.despawned
     assert world.sessions.get_session(sid).is_active is False
+
+
+def test_ws_disconnect_with_grace_zero_keeps_a_session_another_connection_holds(client, world):
+    world.session_disconnect_grace_s = 0.0
+    sid = _join(client).json()["session_id"]
+    world.sessions.mark_connected(sid)  # e.g. the vehicle page on the hub
+    with client.websocket_connect(f"/ws/client/{sid}") as ws:
+        ws.receive_json()
+    assert sid not in world.despawned and world.sessions.get_session(sid).is_active is True
+
+
+def test_rest_telemetry_poll_counts_as_a_sign_of_life(client, world):
+    from datetime import datetime, timedelta, timezone
+    sid = _join(client).json()["session_id"]
+    session = world.sessions.get_session(sid)
+    session.last_seen = datetime.now(timezone.utc) - timedelta(hours=1)
+    assert client.get(f"/client/vehicle/{sid}").status_code == 200
+    assert (datetime.now(timezone.utc) - session.last_seen).total_seconds() < 5
 
 
 def test_ws_expired_session_is_reported(client, world):
@@ -380,12 +439,9 @@ def test_lidar_endpoints_reject_unknown_sessions(client, world):
 
 
 def test_lidar_viewer_scripts_are_served_as_javascript(client):
-    for name in ("lidar-decoder.js", "lidar-view.js"):
-        r = client.get(f"/static/legacy/{name}")
+    for name in ("lidar-decoder.js", "lidar-worker.js", "lidar-stream.js"):
+        r = client.get(f"/static/js/{name}")
         assert r.status_code == 200 and "javascript" in r.headers["content-type"], name
-    assert "LidarDecoder" in client.get("/static/legacy/lidar-decoder.js").text
-    page = client.get("/client").text
-    assert "/static/legacy/lidar-decoder.js" in page and 'id="lidarCanvas"' in page
 
 
 # --- run recording --------------------------------------------------------

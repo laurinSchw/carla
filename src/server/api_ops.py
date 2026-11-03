@@ -22,10 +22,15 @@ _RECORD_KINDS = {"links", "stations", "messages", "lidar_meta", "raw_lidar"}
 DENM_DEFAULT_DURATION_S = 86400.0   # "until cancelled" = one simulated day
 
 
+class RestartRequiredError(PermissionError):
+    """A configuration field that cannot change while the world runs. Its own class so that an OS-level
+    ``PermissionError`` (e.g. a ``runs/`` directory owned by root) is not reported as "restart required"."""
+
+
 class ApiOpsMixin:
     # -- configuration -----------------------------------------------------------------------------
     def apply_config(self, changes: Dict[str, Any]) -> dict:
-        """Change hot fields of the running world, all or nothing. Raises ``PermissionError`` for a field that needs a restart,
+        """Change hot fields of the running world, all or nothing. Raises ``RestartRequiredError`` for a field that needs a restart,
         ``ValueError`` for an unknown field or a value the configuration rules reject."""
         self._require_sim_thread()
         if not isinstance(changes, dict) or not changes:
@@ -35,7 +40,7 @@ class ApiOpsMixin:
             raise ValueError(f"unknown configuration field(s): {', '.join(sorted(unknown))}")
         cold = sorted(k for k in changes if k not in HOT_FIELDS)
         if cold:
-            raise PermissionError(f"{', '.join(cold)} cannot change while the world runs (restart required)")
+            raise RestartRequiredError(f"{', '.join(cold)} cannot change while the world runs (restart required)")
         old = self.config
         new = WorldConfig.model_validate({**old.model_dump(), **changes})   # runs every cross-field rule
         self.config = new

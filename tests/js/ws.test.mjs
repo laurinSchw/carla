@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HubSocket } from '../../src/web/static/js/ws.js';
+import { HubSocket } from '../../src/visualization/web/static/js/ws.js';
 
 class FakeWS {
   static instances = [];

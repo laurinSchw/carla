@@ -34,7 +34,8 @@ shares nothing). Decisions D1–D13 in the handoff (§7) belong to the human; as
 ```
 start_server.py                 CLI entry (argparse → uvicorn). Run from repo root.
 src/server/
-  app.py                        FastAPI app; /, /admin, /client, /static; shuts the world down on exit
+  app.py                        FastAPI app; pages / (index), /observer, /vehicle, /admin, /client (redirect to /vehicle),
+                                /static; shuts the world down on exit
   admin_routes.py               /admin/*: connect (seed, drivers, advisory, ...), status (+timing_ms), sessions, traffic,
                                 pedestrians, stop, runs, v2x/{rsus,vrus,spat,links,hazards}   (token: ADMIN_TOKEN)
   client_routes.py              /client/{blueprints,join,leave,lidar/...}, WS /ws/client/{id}, WS /ws/lidar/{id} (binary v3)
@@ -47,7 +48,7 @@ src/v2x/                        dsrc_channel.py (DSRCConfig, DSRCChannel, LinkRe
 src/lidar/                      protocol.py (v3 wire format), config.py, manager.py (lifecycle, budget, profiles), carla_backend.py
 src/recording/recorder.py       run directory writer + tolerant link reader
 src/traffic/                    drivers.py (seeded profiles → Traffic Manager settings), advisory.py (V2X-assisted slow-down)
-src/visualization/web/          admin_panel.html, client_join.html (+ static/js lidar-decoder.js, lidar-view.js; canvas, no Three.js)
+src/visualization/web/          index.html, observer.html, vehicle.html, admin.html (+ static/js ES modules, static/css, static/vendor)
 tests/                          golden/ unit/ v2x/ contract/ integration/ (carla) server/ (server+carla)
 docs/science/                   model.md (what the channel does), recording.md (run formats), CHANGELOG.md (every result-changing
                                 change with numbers), audit.md (superseded)
@@ -60,7 +61,7 @@ Docker is the normal way to run this.
 ```bash
 cp .env.example .env            # set ADMIN_TOKEN (compose refuses to start without it)
 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build frontend    # the sha names recorded runs
-# http://localhost:8000   /admin (token)   /client (open)    recorded runs appear in ./runs/
+# http://localhost:8000   /admin (token)   /observer, /vehicle (open)    recorded runs appear in ./runs/
 ```
 Local: `python start_server.py [--live --carla-host H --carla-port 2002 --admin-token T --port 8000 --no-v2x --v2x-range 75
 --v2x-rate 2 --v2x-penetration 1.0 --seed 42 --no-drivers --v2x-advisory --tm-port 8001]`. Without `--live` only the web UI runs;
@@ -84,7 +85,7 @@ the admin connects CARLA from `/admin` or `POST /admin/connect`. Run from the re
 ## 6. Tests
 From the repo root: `python -m pytest tests -q -m "not carla"` (venv or container). Markers: `carla` (live CARLA), `server` (deployed server, `SERVER_URL`).
 Baseline: 487 passed, 11 skipped, 5 xfailed (host); 9 of those passes come from the untracked `tests/test_lidar_enhanced.py`. The 5 strict xfails are stale by
-design (CSMA drops at N=100; neighbour tests that never call `broadcast_all`). Node-based tests (`test_lidar_js_decoder.py`, `test_lidar_view_js.py`) skip without Node (e.g. in the image).
+design (CSMA drops at N=100; neighbour tests that never call `broadcast_all`). Node-based tests skip without Node (e.g. in the image).
 - `tests/golden/` — pin `DSRCChannel` (seed 42) and `create_bsm_from_carla` in `expected/*.json`; floats compare at 1e-9 relative. Regenerate only on purpose.
 - `tests/v2x/` — channel, messages, infrastructure/DENM links, model fixes, the channel table pinned against `docs/science/model.md`.
 - `tests/unit/` — LiDAR (protocol, manager, backend queue, geometry vs `carla.Transform`, JS decoder under Node), recorder, drivers/advisory, WorldConfig, and the

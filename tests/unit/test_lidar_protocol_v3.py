@@ -110,3 +110,20 @@ def test_header_layout_is_fixed():
     assert struct.unpack_from("<H", data, 44)[0] == 12 + 1 + 4 + 4   # stride: xyz f32, tag u8, object_idx u32, cos_inc f32
     assert struct.unpack_from("<H", data, 46)[0] == protocol.SEMANTIC_FIELDS
     assert struct.unpack_from("<6d", data, 48) == (10.0, -20.5, 2.4, 1.0, 90.0, -2.0)  # location, then pitch/yaw/roll
+
+
+def test_field_bits_are_the_web_decoders():
+    """The bit assignment of static/js/lidar-decoder.js (the UI is the contract)."""
+    assert (protocol.FIELD_XYZ, protocol.FIELD_TAG_U8, protocol.FIELD_TAG_U32, protocol.FIELD_OBJECT_IDX,
+            protocol.FIELD_INTENSITY, protocol.FIELD_COS_INC) == (1, 2, 4, 8, 16, 32)
+    assert protocol.SEMANTIC_FIELDS == 43 and protocol.RAYCAST_FIELDS == 17
+
+
+def test_tag_u32_round_trip_and_both_tag_widths_rejected():
+    pts = _semantic(5)
+    pts["tag"] = [0, 255, 256, 70000, 2**31]
+    mask = protocol.FIELD_XYZ | protocol.FIELD_TAG_U32 | protocol.FIELD_OBJECT_IDX
+    h, out = protocol.decode(protocol.encode(pts, field_mask=mask, **KW))
+    assert h.stride == 12 + 4 + 4 and list(out["tag"]) == [0, 255, 256, 70000, 2**31]
+    with pytest.raises(ProtocolError, match="mutually exclusive"):
+        protocol.point_dtype(protocol.FIELD_XYZ | protocol.FIELD_TAG_U8 | protocol.FIELD_TAG_U32)
