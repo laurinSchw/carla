@@ -1,5 +1,11 @@
-"""V2X Communication Package — extends V2V with V2I (RSU/SPAT/MAP) and V2P (VRU) protocols."""
+"""V2X Communication Package — V2V (BSM/CAM/DENM over 802.11p DSRC), V2I (RSU/SPAT/MAP) and V2P (VRU)."""
 
+from .safety_messages import (
+    BSMCore, BSMPartII, CooperativeAwarenessMessage, V2VEnhancedMessage,
+    DENM, DENMCauseCode,
+    VehicleType, BrakingStatus,
+    create_bsm_from_carla, create_cam_from_bsm, calculate_threat_level,
+)
 from .messages import (
     VRUProfile,
     ObjectClassification,
@@ -12,10 +18,15 @@ from .messages import (
     CPMMessage,
     VRUAwarenessMessage,
 )
+from .dsrc_channel import DSRCChannel, DSRCConfig
 from .rsu import RSUConfig, RoadSideUnit
-from .network import V2XNetworkEnhanced
+from .network import V2XNetwork
 
 __all__ = [
+    "BSMCore", "BSMPartII", "CooperativeAwarenessMessage", "V2VEnhancedMessage",
+    "DENM", "DENMCauseCode",
+    "VehicleType", "BrakingStatus",
+    "create_bsm_from_carla", "create_cam_from_bsm", "calculate_threat_level",
     "VRUProfile",
     "ObjectClassification",
     "MAPLane",
@@ -26,7 +37,8 @@ __all__ = [
     "SensorInfo",
     "CPMMessage",
     "VRUAwarenessMessage",
+    "DSRCChannel", "DSRCConfig",
     "RSUConfig",
     "RoadSideUnit",
-    "V2XNetworkEnhanced",
+    "V2XNetwork",
 ]

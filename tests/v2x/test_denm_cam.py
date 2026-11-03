@@ -3,7 +3,7 @@ Unit tests for DENM and CAM protocol support.
 
 Covers:
   - DENM dataclass construction and field validation
-  - V2VNetworkEnhanced DENM store: publish / get / cancel
+  - V2XNetwork DENM store: publish / get / cancel
   - create_cam_from_bsm() field mapping
   - API endpoints: GET /cam, GET /cam/{id}, GET /denm, GET /denm/{id},
                    POST /denm, DELETE /denm/{station}/{action}
@@ -15,7 +15,7 @@ import pytest
 import time
 
 # Re-use mock infrastructure from the existing basic test suite
-from tests.v2v.test_v2v_basic import (
+from tests.v2x.test_bsm_basic import (
     MockVehicle,
     MockWorld,
     MockWorldSnapshot,
@@ -23,7 +23,7 @@ from tests.v2v.test_v2v_basic import (
     _transparent_dsrc,
 )
 
-from src.v2v.messages import (
+from src.v2x.safety_messages import (
     BSMCore,
     DENM,
     DENMCauseCode,
@@ -31,7 +31,7 @@ from src.v2v.messages import (
     BrakingStatus,
     VehicleType,
 )
-from src.v2v.network_enhanced import V2VNetworkEnhanced
+from src.v2x.network import V2XNetwork
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,8 +65,8 @@ def _make_denm(station_id: int = 1, action_id: int = 42,
     )
 
 
-def _make_network() -> V2VNetworkEnhanced:
-    return V2VNetworkEnhanced(
+def _make_network() -> V2XNetwork:
+    return V2XNetwork(
         max_range=200.0,
         update_rate_hz=2.0,
         dsrc_config=_transparent_dsrc(),

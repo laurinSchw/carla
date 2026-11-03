@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LiDAR Data Collector for V2V Communication
+LiDAR Data Collector for V2X Communication
 Collects and processes semantic LiDAR data from multiple vehicles.
 """
 

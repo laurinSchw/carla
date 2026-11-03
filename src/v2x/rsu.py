@@ -80,13 +80,13 @@ class RoadSideUnit:
 
     Wraps one or more CARLA TrafficLight actors at an intersection and produces
     MAP / SPAT messages that are injected into the V2X network each 2 Hz tick
-    via V2XNetworkEnhanced.register_rsu().
+    via V2XNetwork.register_rsu().
 
     Usage::
 
         rsu = RoadSideUnit.from_traffic_light(tl_actor, intersection_id=1)
         v2x_network.register_rsu(rsu)
-        # V2XNetworkEnhanced.update() broadcasts MAP/SPAT automatically.
+        # V2XNetwork.update() broadcasts MAP/SPAT automatically.
     """
 
     def __init__(

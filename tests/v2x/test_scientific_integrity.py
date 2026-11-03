@@ -9,8 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.v2v import BSMCore, calculate_threat_level, create_bsm_from_carla, V2VNetworkEnhanced
-from src.v2v.dsrc_channel import DSRCConfig
+from src.v2x import BSMCore, calculate_threat_level, create_bsm_from_carla, V2XNetwork
+from src.v2x.dsrc_channel import DSRCConfig
 
 
 def _transparent_dsrc() -> DSRCConfig:
@@ -216,7 +216,7 @@ class TestScientificIntegrity(unittest.TestCase):
         world = MockWorld()
         v1 = MockVehicle(1, x=0.0)
         v2 = MockVehicle(2, x=10.0)
-        net = V2VNetworkEnhanced(max_range=200.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
+        net = V2XNetwork(max_range=200.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
         net.register(1, v1)
         net.register(2, v2)
 
@@ -234,7 +234,7 @@ class TestScientificIntegrity(unittest.TestCase):
     def test_non_forced_update_respects_2hz_sim_time(self):
         world = MockWorld()
         v1 = MockVehicle(1, x=0.0)
-        net = V2VNetworkEnhanced(max_range=200.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
+        net = V2XNetwork(max_range=200.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
         net.register(1, v1)
 
         snap0 = MockWorldSnapshot([v1], elapsed_seconds=0.0)
@@ -251,7 +251,7 @@ class TestScientificIntegrity(unittest.TestCase):
         world = MockWorld()
         v1 = MockVehicle(1, x=0.0, y=0.0, speed_x=10.0)
         v2 = MockVehicle(2, x=20.0, y=0.0, speed_x=-10.0)
-        net = V2VNetworkEnhanced(max_range=200.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
+        net = V2XNetwork(max_range=200.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
         net.register(1, v1)
         net.register(2, v2)
 
@@ -275,7 +275,7 @@ class TestV2VStatsScientificValidity(unittest.TestCase):
         """Helper: build a network with n vehicles all within range of each other."""
         world = MockWorld()
         vehicles = [MockVehicle(i, x=float(i * 5)) for i in range(n_vehicles)]
-        net = V2VNetworkEnhanced(max_range=range_m, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
+        net = V2XNetwork(max_range=range_m, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
         for v in vehicles:
             net.register(v.id, v)
         return net, vehicles, world
@@ -315,7 +315,7 @@ class TestV2VStatsScientificValidity(unittest.TestCase):
         world = MockWorld()
         v1 = MockVehicle(0, x=0.0)
         v2 = MockVehicle(1, x=500.0)
-        net = V2VNetworkEnhanced(max_range=75.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
+        net = V2XNetwork(max_range=75.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
         net.register(0, v1)
         net.register(1, v2)
 
@@ -376,7 +376,7 @@ class TestV2VStatsScientificValidity(unittest.TestCase):
         v1 = MockVehicle(0, x=0.0)
         v2 = MockVehicle(1, x=10.0)
         v3 = MockVehicle(2, x=1000.0)  # far away
-        net = V2VNetworkEnhanced(max_range=75.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
+        net = V2XNetwork(max_range=75.0, update_rate_hz=2.0, world=world, dsrc_config=_transparent_dsrc())
         for v in [v1, v2, v3]:
             net.register(v.id, v)
 
@@ -390,8 +390,8 @@ class TestV2VStatsScientificValidity(unittest.TestCase):
     # ------------------------------------------------------------------ #
 
     def test_new_network_instance_starts_with_zero_stats(self):
-        """A freshly created V2VNetworkEnhanced has all counters at zero."""
-        net = V2VNetworkEnhanced(max_range=75.0, update_rate_hz=2.0, dsrc_config=_transparent_dsrc())
+        """A freshly created V2XNetwork has all counters at zero."""
+        net = V2XNetwork(max_range=75.0, update_rate_hz=2.0, dsrc_config=_transparent_dsrc())
         stats = net.get_network_stats()
         self.assertEqual(stats['total_messages_sent'], 0)
         self.assertEqual(stats['total_messages_received'], 0)

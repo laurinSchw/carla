@@ -11,7 +11,7 @@ from types import SimpleNamespace as NS
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.v2v.messages import create_bsm_from_carla
+from src.v2x.safety_messages import create_bsm_from_carla
 from tests.golden.helpers import assert_matches_golden
 
 

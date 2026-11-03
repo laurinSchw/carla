@@ -15,7 +15,7 @@ Usage
 Thread safety
 -------------
 All actor-list mutations go through ``_lock``.  The tick thread only reads
-the vehicle dict (for V2V updates) and calls ``_check_expired_sessions``
+the vehicle dict (for V2X updates) and calls ``_check_expired_sessions``
 which re-acquires the lock for any despawn operations.
 """
 
@@ -152,7 +152,7 @@ class PersistentCARLAServer:
         self.spawn_points = self.world.get_map().get_spawn_points()
         logger.info("Map has %d spawn points", len(self.spawn_points))
 
-        # Optional V2X network (V2V + V2I RSU + V2P VRU)
+        # V2X network (V2V + V2I RSU + V2P VRU)
         if self.v2x_enabled:
             self._init_v2x()
 
@@ -185,9 +185,9 @@ class PersistentCARLAServer:
 
     def _init_v2x(self) -> None:
         try:
-            from src.v2x.network import V2XNetworkEnhanced
+            from src.v2x.network import V2XNetwork
             from src.v2x.rsu import RoadSideUnit
-            self.v2x_network = V2XNetworkEnhanced(
+            self.v2x_network = V2XNetwork(
                 max_range=self.v2x_range,
                 update_rate_hz=2.0,
                 world=self.world,

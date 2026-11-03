@@ -10,8 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.v2v.dsrc_channel import DSRCChannel, DSRCConfig
-from src.v2v.messages import BSMCore, BrakingStatus, VehicleType
+from src.v2x.dsrc_channel import DSRCChannel, DSRCConfig
+from src.v2x.safety_messages import BSMCore, BrakingStatus, VehicleType
 from tests.golden.helpers import assert_matches_golden
 
 TICKS = 5  # consecutive broadcast_all() calls on one channel, so the RNG sequence is pinned

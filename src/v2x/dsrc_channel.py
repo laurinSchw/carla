@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 import random
 
-from .messages import BSMCore
+from .safety_messages import BSMCore
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ class DSRCChannel:
     the probabilistic, broadcast, and contention-sensitive nature of the
     DSRC/WAVE medium. No external broker or network infrastructure is required.
 
-    Usage inside V2VNetworkEnhanced.update():
+    Usage inside V2XNetwork.update():
 
         positions = {
             vid: (bsm.latitude, bsm.longitude)

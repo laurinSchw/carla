@@ -107,8 +107,8 @@
         <input type="number" id="carlaPort" value="2000" min="1" max="65535">
       </div>
       <div>
-        <label>V2V Range (m)</label>
-        <input type="number" id="v2vRange" value="75" min="10" max="500">
+        <label>V2X Range (m)</label>
+        <input type="number" id="v2xRange" value="75" min="10" max="500">
       </div>
       <button id="connectBtn" onclick="connectWorld()" style="height:36px">Connect</button>
     </div>
@@ -232,7 +232,7 @@ function setWorldBadge(state) {
 async function connectWorld() {
   const host  = document.getElementById('carlaHost').value.trim();
   const port  = parseInt(document.getElementById('carlaPort').value);
-  const range = parseFloat(document.getElementById('v2vRange').value);
+  const range = parseFloat(document.getElementById('v2xRange').value);
   if (!host) { toast('Enter a CARLA host IP', 'err'); return; }
 
   const btn = document.getElementById('connectBtn');
@@ -240,7 +240,7 @@ async function connectWorld() {
   btn.textContent = 'Connecting…';
 
   const r = await api('POST', '/admin/connect', {
-    carla_host: host, carla_port: port, v2v_range: range, v2v_enabled: true,
+    carla_host: host, carla_port: port, v2x_range: range, v2x_enabled: true,
   });
   if (r) {
     toast(r.message, 'ok');

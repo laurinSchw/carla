@@ -70,3 +70,5 @@ V2V_IMPLEMENTATION.md
 *.notes
 
 .env
+.venv/
+stress_test_results_*/

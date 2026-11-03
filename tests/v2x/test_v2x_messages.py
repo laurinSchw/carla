@@ -10,8 +10,8 @@ Coverage:
   - SPATMovementState phase timing window invariants
   - CPMMessage / PerceivedObject relative-position fields
   - VRUAwarenessMessage motion-state logic
-  - V2XNetworkEnhanced RSU and VRU registries (mocked actors)
-  - V2XNetworkEnhanced.update() dispatches to RSU and VRU pipelines
+  - V2XNetwork RSU and VRU registries (mocked actors)
+  - V2XNetwork.update() dispatches to RSU and VRU pipelines
   - get_v2x_summary() includes V2X-specific keys
 """
 
@@ -31,8 +31,8 @@ from src.v2x.messages import (
     VRUAwarenessMessage,
 )
 from src.v2x.rsu import RSUConfig, RoadSideUnit
-from src.v2x.network import V2XNetworkEnhanced
-from src.v2v.dsrc_channel import DSRCConfig
+from src.v2x.network import V2XNetwork
+from src.v2x.dsrc_channel import DSRCConfig
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -377,13 +377,13 @@ class TestRoadSideUnit(unittest.TestCase):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# V2XNetworkEnhanced — registry and update dispatch
+# V2XNetwork — registry and update dispatch
 # ══════════════════════════════════════════════════════════════════════════════
 
-class TestV2XNetworkEnhanced(unittest.TestCase):
+class TestV2XNetwork(unittest.TestCase):
 
     def _make_network(self):
-        return V2XNetworkEnhanced(
+        return V2XNetwork(
             max_range=200.0,
             update_rate_hz=2.0,
             dsrc_config=_transparent_dsrc(),
@@ -531,7 +531,7 @@ class TestV2XNetworkEnhanced(unittest.TestCase):
     # ── backward compat: V2V interface still works ─────────────────────────
 
     def test_v2v_register_and_get_neighbors_still_works(self):
-        """V2XNetworkEnhanced must not break existing V2V behavior."""
+        """V2XNetwork must not break existing V2V behavior."""
         net = self._make_network()
         veh0 = _MockVehicle(vid=0, x=0.0,  y=0.0)
         veh1 = _MockVehicle(vid=1, x=10.0, y=0.0)

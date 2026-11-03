@@ -12,8 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.v2v import V2VNetworkEnhanced, BSMCore
-from src.v2v.dsrc_channel import DSRCConfig
+from src.v2x import V2XNetwork, BSMCore
+from src.v2x.dsrc_channel import DSRCConfig
 
 
 def _transparent_dsrc() -> DSRCConfig:
@@ -149,7 +149,7 @@ class TestV2VBasics(unittest.TestCase):
     
     def test_network_creation(self):
         """Test creating V2V network"""
-        v2v = V2VNetworkEnhanced(max_range=100.0, update_rate_hz=2.0, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=100.0, update_rate_hz=2.0, dsrc_config=_transparent_dsrc())
         self.assertIsNotNone(v2v)
         self.assertEqual(v2v.max_range, 100.0)
         self.assertEqual(v2v.update_rate_hz, 2.0)
@@ -157,7 +157,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_vehicle_registration(self):
         """Test registering vehicles"""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
         v1 = MockVehicle(1, 0, 0)
         world.add_vehicle(v1)
         
@@ -170,7 +170,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_bsm_creation(self):
         """Test BSM message creation"""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
         v1 = MockVehicle(1, 100, 50)
         world.add_vehicle(v1)
         
@@ -186,7 +186,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_neighbor_discovery(self):
         """Test neighbor discovery within range"""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
         
         v1 = MockVehicle(1, 0, 0)
         v2 = MockVehicle(2, 50, 0)  # 50m away
@@ -207,7 +207,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_network_stats(self):
         """Test network statistics"""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
         
         v1 = MockVehicle(1, 0, 0)
         world.add_vehicle(v1)
@@ -224,7 +224,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_message_counter_wraps_at_128(self):
         """Message counters should wrap from 127 back to 0."""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
 
         v1 = MockVehicle(1, 0, 0)
         world.add_vehicle(v1)
@@ -238,7 +238,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_neighbor_range_boundary_is_inclusive(self):
         """Vehicles exactly at max_range must still be treated as neighbors."""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=50.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=50.0, world=world, dsrc_config=_transparent_dsrc())
 
         v1 = MockVehicle(1, 0, 0)
         v2 = MockVehicle(2, 50, 0)  # Exactly at boundary
@@ -254,7 +254,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_distance_symmetry(self):
         """Distance lookup should be symmetric for vehicle pairs."""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=200.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=200.0, world=world, dsrc_config=_transparent_dsrc())
 
         v1 = MockVehicle(1, 10, 20)
         v2 = MockVehicle(2, 40, 60)
@@ -269,7 +269,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_unregister_removes_from_neighbors_on_next_update(self):
         """Removed vehicles must not remain discoverable as neighbors."""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=200.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=200.0, world=world, dsrc_config=_transparent_dsrc())
 
         v1 = MockVehicle(1, 0, 0)
         v2 = MockVehicle(2, 20, 0)
@@ -287,7 +287,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_bidirectional_sharing_honors_share_distance_threshold(self):
         """Cooperative sharing should only include neighbors within share distance."""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
 
         src = MockVehicle(1, 0, 0)
         near = MockVehicle(2, 49.5, 0)
@@ -305,7 +305,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_scalability_100_vehicles_all_neighbors(self):
         """With large range, each vehicle should discover all other vehicles in a 100-vehicle run."""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=10000.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=10000.0, world=world, dsrc_config=_transparent_dsrc())
 
         vehicle_count = 100
         for i in range(vehicle_count):
@@ -329,7 +329,7 @@ class TestV2VBasics(unittest.TestCase):
     def test_one_line_status(self):
         """Test one-line status output"""
         world = MockWorld()
-        v2v = V2VNetworkEnhanced(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
+        v2v = V2XNetwork(max_range=100.0, world=world, dsrc_config=_transparent_dsrc())
         
         v1 = MockVehicle(1, 0, 0)
         v1._velocity = MockVector(15, 0, 0)
