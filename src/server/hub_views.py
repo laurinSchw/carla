@@ -93,6 +93,11 @@ class HubViewsMixin:
                 rsus.append({"station_id": -int(iid), "intersection_id": iid, "x": round(x, 2), "y": round(y, 2), "z": round(z, 2),
                              "enabled": True, "tx_power_dbm": rsu.config.tx_power_dbm,
                              "broadcast_range_m": rsu.config.broadcast_range_m})
+            for iid, rsu in net.get_disabled_rsus().items():
+                x, y, z = rsu.config.position
+                rsus.append({"station_id": -int(iid), "intersection_id": iid, "x": round(x, 2), "y": round(y, 2), "z": round(z, 2),
+                             "enabled": False, "tx_power_dbm": rsu.config.tx_power_dbm,
+                             "broadcast_range_m": rsu.config.broadcast_range_m})
             rsus.sort(key=lambda r: r["intersection_id"])
         self._world_state_version += 1
         self._world_state = Published(self._world_state_version, self._frame, self._sim_time,

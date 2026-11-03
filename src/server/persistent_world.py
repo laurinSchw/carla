@@ -48,6 +48,7 @@ from src.traffic.advisory import V2XAdvisory, hazard_is_relevant
 from src.traffic.drivers import DriverAssigner, DriverProfile, apply_profile
 from src.recording.recorder import RunAlreadyRecording, RunRecorder, list_runs
 from src.server.route_utils import ConflictError
+from src.server.api_ops import ApiOpsMixin
 from src.server.hub_views import HubViewsMixin
 from src.server.session_manager import SessionManager
 from src.server.sim_executor import SimThreadExecutor
@@ -88,7 +89,7 @@ def _git_sha() -> str:
     return _GIT_SHA
 
 
-class PersistentCARLAServer(HubViewsMixin):
+class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin):
     """
     Manages a persistent CARLA world that runs indefinitely.
 
