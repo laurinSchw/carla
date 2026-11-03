@@ -11,6 +11,24 @@ from pathlib import Path
 
 GOLDEN_DIR = Path(__file__).parent / "expected"
 
+# Floats may differ in the last digits between Python/libm builds (3.10 image vs 3.12 host).
+# 1e-9 relative is far below any model change but above that noise.
+_REL_TOL = 1e-9
+
+
+def _same(a, b) -> bool:
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a is b
+    if isinstance(a, float) or isinstance(b, float):
+        if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+            return False
+        return a == b or abs(a - b) <= _REL_TOL * max(abs(a), abs(b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    return a == b
+
 
 def assert_matches_golden(name: str, actual) -> None:
     path = GOLDEN_DIR / f"{name}.json"
@@ -22,4 +40,4 @@ def assert_matches_golden(name: str, actual) -> None:
         return
     assert path.exists(), f"missing golden file {path}; run with UPDATE_GOLDEN=1 to create it"
     expected = json.loads(path.read_text())
-    assert actual == expected, f"output differs from golden file {path}"
+    assert _same(actual, expected), f"output differs from golden file {path}"

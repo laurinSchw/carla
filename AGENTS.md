@@ -21,7 +21,7 @@ list S1–S20/C1–C13, target architecture and phase acceptance criteria).
 | 0 Safety net (golden tests, lazy `import carla`) | done | `developer` |
 | 1 Remove monolithic V2V demo plane | done | `developer` |
 | 2 Core skeleton (single sim thread owns CARLA via `SimThreadExecutor`, `WorldConfig`, locked `SessionManager`, 5 Hz WS, contract tests) | **done and merged into `developer`** (2026-11-03). Still open from the Phase 2 list: package layout `sim/`, `api/`, `config.py` (§5.2) — the code still lives in `src/server/` | `developer` |
-| 3 V2X unification | **step 1 done** (`src/v2v` merged into `src/v2x`, one `V2XNetwork`, golden output identical). Model-change steps (S2, S4, S7 …), channel docs and `LinkResult` are **not started** | `developer` |
+| 3 V2X unification | **step 1 done** (`src/v2v` merged into `src/v2x`, one `V2XNetwork`, golden output identical). Model fixes done so far: S2 yaw rate, C7 2 Hz gate, S17 SPAT timing (see `docs/science/CHANGELOG.md`). Open: S3 (penetration rate), S4 (MAP/SPAT/VRUAM through the channel), S7 (RSU grouping), S8 (x_m/y_m fields), S9–S11, S13, S14, S18, channel docs `docs/science/model.md`, `LinkResult` | `developer` |
 | 4–8 LiDAR rework, WS hub, new frontend, recording, docs | not started | — |
 
 Remaining defects from the handoff list are in `REFACTOR_HANDOFF.md` §3.1 (check which are fixed by Phase 2 before touching them).
@@ -95,13 +95,12 @@ Run in the venv or container, from the repo root: `python -m pytest tests -q -m 
 - `tests/golden/` — pin `DSRCChannel` (seed 42) and `create_bsm_from_carla` output in
   `tests/golden/expected/*.json` (tracked). They detect change, not correctness; they pin known defects.
   Regenerate only on purpose: `UPDATE_GOLDEN=1 pytest tests/golden`.
-  **In the Docker image (Python 3.10) 3 golden DSRC cases (`grid100`, `line10_no_nlos_model`,
-  `pair_30m`) fail even on the pre-refactor commit** — the files were generated on Python 3.12.
+  Floats compare with a 1e-9 relative tolerance (Python 3.10 image vs 3.12 host differ in the last digit); a real model change still fails.
 - `tests/v2x/` — channel, BSM/DENM/CAM, V2X messages/registries, neighbour discovery, scientific integrity.
 - `tests/unit/` — CSMA pins, LiDAR protocol. `tests/test_v2v_lidar.py` — collector transforms.
 - `tests/contract/` — API contract tests against `FakeWorld` (no CARLA). `tests/unit/test_sim_executor.py`, `test_persistent_world_threading.py`, `test_world_config.py` — Phase 2 threading.
   `tests/integration/` (`carla`) and `tests/server/` (`server`) — live/deployed smoke tests.
-- Baseline (host, `.venv`, `-m "not carla"`): 258 passed, 11 skipped, 5 xfailed (strict, stale by design: CSMA drops at N=100,
+- Baseline (host, `.venv`, `-m "not carla"`): 261 passed, 11 skipped, 5 xfailed (strict, stale by design: CSMA drops at N=100,
   neighbour tests that never call `broadcast_all`).
 - Known weak tests: `test_lidar_enhanced.py` (untracked; path bug, tests its own mocks),
   rotation/JSON tests in `test_v2v_lidar.py`, several "stored value" asserts in
