@@ -115,6 +115,22 @@ class LidarLimits(BaseModel):
 POINT_BUCKETS = (10_000, 25_000, 50_000)
 
 
+#: CARLA semantic tag ids with names and colours as in CARLA's documented table (CityScapes palette). Ids 24+ are
+#: the extended 0.9.12+ set. Unverified against the 0.9.16 documentation: treat names/colours as display hints.
+SEMANTIC_TAGS = (
+    (0, "Unlabeled", (0, 0, 0)), (1, "Roads", (128, 64, 128)), (2, "SideWalks", (244, 35, 232)),
+    (3, "Building", (70, 70, 70)), (4, "Wall", (102, 102, 156)), (5, "Fence", (190, 153, 153)),
+    (6, "Pole", (153, 153, 153)), (7, "TrafficLight", (250, 170, 30)), (8, "TrafficSign", (220, 220, 0)),
+    (9, "Vegetation", (107, 142, 35)), (10, "Terrain", (152, 251, 152)), (11, "Sky", (70, 130, 180)),
+    (12, "Pedestrian", (220, 20, 60)), (13, "Rider", (255, 0, 0)), (14, "Car", (0, 0, 142)),
+    (15, "Truck", (0, 0, 70)), (16, "Bus", (0, 60, 100)), (17, "Train", (0, 80, 100)),
+    (18, "Motorcycle", (0, 0, 230)), (19, "Bicycle", (119, 11, 32)), (20, "Static", (110, 190, 160)),
+    (21, "Dynamic", (170, 120, 50)), (22, "Other", (55, 90, 80)), (23, "Water", (45, 60, 150)),
+    (24, "RoadLine", (157, 234, 50)), (25, "Ground", (81, 0, 81)), (26, "Bridge", (150, 100, 100)),
+    (27, "RailTrack", (230, 150, 140)), (28, "GuardRail", (180, 165, 180)),
+)
+
+
 def lidar_schema() -> dict:
     """JSON-friendly description of the valid settings per sensor type, for UIs (``GET /api/lidar/schema``)."""
     common = LidarConfig.model_json_schema()["properties"]
@@ -133,5 +149,6 @@ def lidar_schema() -> dict:
         },
         "properties": common,
         "stream_point_buckets": list(POINT_BUCKETS) + ["all"],
+        "semantic_tags": [{"id": i, "name": n, "color": list(c)} for i, n, c in SEMANTIC_TAGS],
         "note": "Attribute names and valid ranges follow CARLA 0.9.x and are unverified against 0.9.16.",
     }

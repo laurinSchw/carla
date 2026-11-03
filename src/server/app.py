@@ -19,6 +19,8 @@ app = FastAPI(title="CARLA V2X + LiDAR Server")
 app.include_router(_admin_mod.router)
 app.include_router(_client_mod.router)
 
+if (WEB_DIR / "static").exists():
+    app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
 if (WEB_DIR / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(WEB_DIR / "assets")), name="assets")
 

@@ -255,3 +255,11 @@ LiDAR data is sensor-frame and not part of the V2X model; no V2X output changes.
   **Not measured:** tick p95 with 3 LiDAR sessions on a live CARLA server (the handoff's Phase 4 acceptance number) — needs a server.
 - **Unverified against CARLA 0.9.16:** the ray_cast-only attribute names (`noise_stddev`, `dropoff_*`, `atmosphere_attenuation_rate`) and that
   `data.frame` equals the ticked frame in synchronous mode. `tests/server` (`-m carla`) contains the end-to-end check.
+
+### Phase 4 addendum — LiDAR display (client page)
+`/client` now has a LiDAR card: request/reconfigure/stop a sensor (channels, points/s, range), stream settings (points, rate, zlib),
+top-down and 3-D (drag) views, colour by semantic class / height / distance / intensity, hide-own-vehicle, live stats (frame, points,
+kB/frame, fps). Code: `web/static/js/lidar-decoder.js` (mirrors `src/lidar/protocol.py`, checked against the Python encoder under Node)
+and `lidar-view.js` (canvas, no dependencies). Verified in Firefox headless with a synthetic scene streamed through the real server path.
+Not verified: behaviour with real CARLA data, fps/CPU of the 2-D canvas renderer at 50 k points on a slow device (software projection, one
+`fillRect` per point).

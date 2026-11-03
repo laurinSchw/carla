@@ -111,7 +111,7 @@ Run in the venv or container, from the repo root: `python -m pytest tests -q -m 
 - `CPMMessage` is defined but nothing generates it.
 - Live-CARLA verification is still missing for S2, S7, S9 (`ActorSnapshot.get_acceleration`, `get_group_traffic_lights`) and for N² channel cost with penetration 1.0.
 - Zero latency; shadowing i.i.d.; MAC term is a placeholder; NLOS ignores buildings — see `docs/science/model.md` §4.
-- LiDAR viewer: `client_join.html` only shows a badge; it does not decode v3 frames (Phase 6 JS decoder, `web/static/js/lidar-decoder.js`, is not written).
+- LiDAR viewer lives in the client page (`web/static/js/lidar-decoder.js`, `lidar-view.js`, canvas, no Three.js); the planned observer/admin pages of Phase 6 do not exist.
 - Untracked work files of the owner (hidden from `git add <dir>` by `.git/info/exclude`; never commit them without asking): `collector_enhanced.py` (depends on the removed collector), `tests/test_lidar_enhanced.py` (tests its own mocks), root stress/accuracy scripts, `STRESS_*`/`LIDAR_*` summaries, `docs/LIDAR_SERVER_IMPLEMENTATION.md` (describes the OLD LiDAR design).
 
 ## 8. Conventions
