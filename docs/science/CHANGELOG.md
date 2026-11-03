@@ -359,3 +359,40 @@ Details and file formats: `docs/science/recording.md`.
   (`exp(−0.005·(N−1))` = 0.865 at 30 stations), not radio physics — until that term is calibrated (open item S6/D5), packet-loss conclusions are about the placeholder.
   The effect on speeds is NOT established: with no control run, mean speed fell everywhere after the publish time (within 100 m: 12.0 → 9.8 km/h, farther away 16.3 → 10.5 km/h).
   A same-seed A/B (advisory on/off) with several seeds is needed before claiming an effect size.
+
+## Independent review by Opus 5.5 (2026-11-03): findings fixed
+Four reviewers (V2X model, LiDAR, server/recording/drivers, tests+docs) read everything changed since `0154ceb`; one of them broke 74 behaviours on purpose
+(19 survived without a failing test; each now has one). Results-affecting items first.
+
+**Results-affecting (V2X):**
+- **BSM contention now counts the same stations as every other message** (vehicles + RSUs + VRUs + active hazard sources). Before, a BSM counted vehicles only, so with 100 RSUs
+  nearby a BSM got p_mac 0.995 while a MAP from an RSU in the same tick got 0.604 (model.md already said "all stations"). Runs without RSUs/VRUs/hazards are unchanged
+  (golden files unchanged); runs with them lose slightly more BSMs than before. Run recordings made earlier used the old contention for BSMs.
+- **A DENM sent by a vehicle is filtered by distance from the EVENT**, not from the sender (an event 290 m ahead of the sender, relevance 50 m, was dropped for the vehicle standing next to it).
+- **The DSRC channel's random stream now follows the master seed** (it was fixed at 42 for every master seed, so repeated runs with different seeds shared one channel stream). The default seed is 42, so default runs are unchanged.
+- **Channel statistics** (`prr`, `avg_rx_margin_db`) are refreshed after the infrastructure messages (they still described only the BSMs: prr 0.667 while deliveries/broadcasts was 0.917). `prr` is the cumulative RADIO delivery rate over all message types.
+- `record_links=False` now switches off ALL link records (it used to keep the infrastructure ones); a VRU that leaves the snapshot stops being broadcast (a stale VRUAM was sent every tick, and
+  the fallback made a blocking RPC for stale data); `unregister` removes the vehicle's threats, distances, neighbour entries and inboxes at once; station ids ≥ 1 000 000 are reserved for hazards.
+
+**LiDAR:** the "10 Hz / 5 Hz" stream rates delivered nothing when polls landed after odd ticks (a `frame % n` test on the latest frame) — now the newest due frame is served; the budget did not count a
+pending reconfigure (200 k → 900 k plus a new 800 k request were both accepted) and iterated a live dict from the HTTP thread (intermittent 500s) — now counted at the new size and read from a published snapshot;
+a sensor that stopped delivering blocked every tick for 0.25 s and never failed — declared dead after 40 consecutive misses and freed; a newer measurement was consumed and thrown away; subsampling jumped
+~40 % of its selection when the point count changed (now stable per-index scores); the encode cache evicted other sensors' frames; PUT with unchanged settings respawned the sensor and a PUT right after DELETE
+returned 400 (now idempotent / creates a new sensor; "busy" is a 409); `record_lidar` runs lost data when the last viewer left (sensors are held while recording); encoding ran on the asyncio loop (now in a thread);
+viewer: leaked ping timers and points behind the 3-D camera were magnified.
+
+**Server / recording / drivers:** LiDAR lifecycle events never reached `events.jsonl` (key clash with the recorder's `frame`); `driver_mix` with NaN/Infinity/negative/zero/strings was accepted, crashed the
+spawn half-way and leaked the vehicles already created (now 422 before anything is stopped, and every spawned actor is tracked before per-vehicle setup); NaN/Infinity in the 422 body itself became a 500
+(handler strips the echoed input); worlds created by `/admin/connect` were never stopped on shutdown (no gzip trailer / final manifest, actors left, CARLA stuck in synchronous mode — now a lifespan hook, `stop()` idempotent);
+a transient disk error left a damaged gzip stream with `complete: true` (now `write_error` in the manifest, `complete: false`, writing stops); two runs in the same second raised an unmapped 500 (suffix `-2`, `-3`);
+plain `gzip.open` raised `EOFError` on a run in progress (documented tolerant reader `iter_link_rows`); hazard coordinates NaN/Infinity broke every later hazard listing; `get_hazards` raced the simulation thread;
+links of the previous update were stamped with a new frame when the V2X update failed; the advisory did nothing with drivers disabled; a kick plus the WebSocket cleanup logged `client_leave` twice; the git sha lookup (a 3 s subprocess) ran on the simulation thread for every run;
+`runs/` was missing from `.dockerignore`.
+
+**Corrections to statements made earlier in this changelog / docs:**
+- "about 2 MB/minute" for 25 vehicles was wrong: 25 vehicles + 5 RSUs at 2 Hz is ≈ 850 link records per update ≈ 100 000 per minute ≈ **6 MB/minute** (before the de-duplication fix and with the doubled infrastructure records the live figures were different again).
+- "`DSRCConfig.record_links=False` switches the links file off" was wrong (the server never passes a `DSRCConfig`; the run's `record_links: false` is the switch) and, until now, also left the infrastructure records on.
+- "480 kB per LiDAR frame": the default frame is 25 000 points × 21 B ≈ 525 kB (505 kB measured live).
+- The statement that the "ETSI EN 302 663 Class A" attribution was removed was not true for `V2XNetwork`'s docstring or the "faithfully represents" claim in `dsrc_channel.py`; both are now corrected.
+- AGENTS.md still listed S2/S7/S9 as unverified live, recording as not started, `latitude/longitude` BSM fields and 299 tests; rewritten.
+- The "Monte Carlo" check of the model.md table now goes through the production `evaluate_link` (the table test alone re-implemented the formula); `_compute_prr` and `evaluate_link` now share one `_p_channel`.

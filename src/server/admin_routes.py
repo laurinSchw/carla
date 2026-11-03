@@ -87,7 +87,7 @@ class ConnectRequest(BaseModel):
     v2x_range: float = Field(default=75.0, ge=10.0, le=500.0)
     v2x_penetration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
     v2x_update_rate_hz: float = Field(default=2.0, gt=0, le=20.0)
-    seed: int = Field(default=42, description="Master seed: spawns, Traffic Manager, pedestrians, driver profiles, channel.")
+    seed: int = Field(default=42, description="Master seed: spawns, Traffic Manager, pedestrians, driver profiles, V2X penetration draw and the DSRC channel.")
     drivers_enabled: bool = Field(default=True, description="Seeded driver profiles (cautious/normal/aggressive) for background traffic.")
     driver_mix: "DriverMixRequest" = Field(default_factory=lambda: DriverMixRequest())
     advisory_enabled: bool = Field(default=False, description="V2X-assisted slow-down for vehicles that received threatening BSMs.")

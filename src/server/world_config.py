@@ -24,9 +24,9 @@ class WorldConfig(BaseModel):
     max_substep_delta_time: float = Field(default=0.01, gt=0)
     max_substeps: int = Field(default=10, ge=1, le=16)
 
-    # Traffic Manager. NOTE: -20.0 means 20 % FASTER than the speed limit (CARLA semantics),
-    # while src/config.py says 30.0 "% slower". Current behaviour (-20.0) is kept; the
-    # contradiction is recorded in docs/science/CHANGELOG.md.
+    # Traffic Manager. NOTE: -20.0 means 20 % FASTER than the speed limit (CARLA semantics). It applies to vehicles
+    # WITHOUT a driver profile (client vehicles, or all vehicles with drivers_enabled=False); background vehicles with a
+    # profile use that profile's own speed offset (src/traffic/drivers.py).
     tm_port: int = Field(default=8001, ge=1024, le=65535)
     seed: int = 42
     global_speed_pct: float = -20.0

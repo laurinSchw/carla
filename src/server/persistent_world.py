@@ -279,10 +279,12 @@ class PersistentCARLAServer:
         try:
             from src.v2x.network import V2XNetwork
             from src.v2x.rsu import RoadSideUnit
+            from src.v2x.dsrc_channel import DSRCConfig
             self.v2x_network = V2XNetwork(
                 max_range=self.v2x_range,
                 update_rate_hz=self.config.v2x_update_rate_hz,
                 world=self.world,
+                dsrc_config=DSRCConfig(random_seed=self.config.seed),  # the channel's random stream follows the master seed
             )
             # One RSU per CARLA traffic-light group (= one signalised intersection), ordered
             # by the smallest actor id in the group so ids are stable between runs (S7).

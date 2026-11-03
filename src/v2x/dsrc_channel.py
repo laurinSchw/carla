@@ -142,9 +142,10 @@ class DSRCChannel:
     """
     In-process DSRC/WAVE (IEEE 802.11p) channel model.
 
-    In-process physics-based packet delivery model that faithfully represents
-    the probabilistic, broadcast, and contention-sensitive nature of the
-    DSRC/WAVE medium. No external broker or network infrastructure is required.
+    Simple in-process, seeded packet-delivery model with a probabilistic, broadcast and contention-sensitive
+    character (log-distance path loss, i.i.d. shadowing, an EXPERIMENTAL contention term). It is a deliberate
+    simplification, not a validated model of the DSRC/WAVE medium: see docs/science/model.md for what it does and
+    does not represent. No external broker or network infrastructure is required.
 
     Usage inside V2XNetwork.update():
 
@@ -307,7 +308,7 @@ class DSRCChannel:
         p_rx, path_loss, shadowing = self._rx_power_parts(distance, nlos, tx_power)
         margin = p_rx - cfg.rx_sensitivity_dbm
         self._record_margin(margin)
-        p_channel = 1.0 / (1.0 + math.exp(-cfg.prr_sigmoid_k * margin))
+        p_channel = self._p_channel(margin)
         p_mac = self._csma_success_prob(n_contenders)
         p_total = p_channel * p_mac
         radio_delivered = self._rng.random() < p_total
@@ -386,8 +387,11 @@ class DSRCChannel:
         margin = p_rx - self.config.rx_sensitivity_dbm
         self._record_margin(margin)
 
-        p_channel = 1.0 / (1.0 + math.exp(-self.config.prr_sigmoid_k * margin))
-        return p_channel * self._csma_success_prob(n_contenders)
+        return self._p_channel(margin) * self._csma_success_prob(n_contenders)
+
+    def _p_channel(self, margin_db: float) -> float:
+        """Logistic channel term of the receive margin: the ONE formula used by evaluate_link and _compute_prr."""
+        return 1.0 / (1.0 + math.exp(-self.config.prr_sigmoid_k * margin_db))
 
     def _record_margin(self, margin_db: float) -> None:
         """Keep the last 500 receive margins for the rolling average (bounded memory)."""

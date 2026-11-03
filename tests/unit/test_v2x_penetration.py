@@ -56,4 +56,21 @@ def test_partial_penetration_is_close_to_rate_and_reproducible(pw):
 
 
 def test_no_v2x_network_is_a_no_op(pw):
-    _register_all(pw, _server(1.0, None), 5)
+    srv = _server(1.0, None)
+    _register_all(pw, srv, 5)
+    assert srv.v2x_network is None            # nothing was created or registered anywhere
+
+
+def test_the_real_server_uses_a_separate_seeded_penetration_stream():
+    """The helper tests above inject their own RNG; this checks the one the server really creates."""
+    import importlib
+    import sys
+    from tests.unit.carla_stub import Recorder, make_carla_module
+    sys.modules["carla"] = make_carla_module(Recorder())
+    sys.modules.pop("src.server.persistent_world", None)
+    pw = importlib.import_module("src.server.persistent_world")
+    from src.server.world_config import WorldConfig
+    srv = pw.PersistentCARLAServer(WorldConfig(host="stub", seed=11))
+    assert srv._v2x_rng is not srv._rng
+    assert srv._v2x_rng.random() == random.Random(12).random() and srv._rng.random() == random.Random(11).random()
+    sys.modules.pop("src.server.persistent_world", None)

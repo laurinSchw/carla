@@ -76,12 +76,12 @@ def test_map_and_spat_arrive_in_the_vehicle_inbox_with_link_records():
 
 
 def test_rsu_uses_its_own_tx_power():
-    net, snap = _world(rsu_power=33.0)
+    net, snap = _world(rsu_power=33.0, vehicle_x=(20.0, 60.0))            # two vehicles, so BSM links exist
     net.update(snap, force=True)
     rsu_link = next(l for l in net.get_link_results() if l.msg_type == "SPAT")
     bsm_links = [l for l in net.get_link_results() if l.msg_type == "BSM"]
     assert rsu_link.tx_power_dbm == 33.0
-    assert all(l.tx_power_dbm == 23.0 for l in bsm_links) or bsm_links == []
+    assert bsm_links and all(l.tx_power_dbm == 23.0 for l in bsm_links)
     # +10 dB vs the 23 dBm default at the same distance (no shadowing)
     other, snap2 = _world(rsu_power=23.0)
     other.update(snap2, force=True)
@@ -136,12 +136,13 @@ def test_every_message_type_has_the_same_record_shape_and_is_reproducible():
     assert {r[0] for r in run()} == {"BSM", "MAP", "SPAT", "VRUAM"}
 
 
-def test_channel_evaluate_link_matches_broadcast_all_statistics():
+def test_evaluate_link_records_one_attempt_in_the_channel_statistics():
     ch = DSRCChannel(_quiet_channel())
     link = ch.evaluate_link(1, 2, (0.0, 0.0), (50.0, 0.0), False, 1)
     assert link.p_total == link.p_channel * link.p_mac
     assert link.rx_margin_db == link.rx_power_dbm - ch.config.rx_sensitivity_dbm
-    assert ch.stats["total_broadcasts"] == 1
+    assert ch.stats["total_broadcasts"] == 1 and ch.stats["total_deliveries"] + ch.stats["total_drops"] == 1
+    assert ch.last_links == [link]
 
 
 def test_vectorised_nlos_matches_the_scalar_rule_on_random_and_degenerate_layouts():

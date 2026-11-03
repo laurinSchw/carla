@@ -9,9 +9,12 @@ checked that it supports the number · *verified* = checked (none yet).
 
 ## 1. Scope
 One in-process packet-delivery model (`src/v2x/dsrc_channel.py`) decides **every** transmission attempt —
-BSM (V2V), MAP and SPAT (RSU→vehicle, `I2V`), VRUAM (VRU→vehicle, `P2V`). Each attempt yields one `LinkResult`.
+BSM (V2V), MAP and SPAT (RSU→vehicle, `I2V`), VRUAM (VRU→vehicle, `P2V`) and DENM (hazard warnings: `I2V` for an admin
+hazard sent from a virtual roadside unit at the event, `V2V` for a vehicle's own DENM). Each attempt yields one `LinkResult`.
 Messages are delivered in the same tick (zero latency) — an assumption, not a measurement (S21).
-The application filter *awareness range* (`WorldConfig.v2x_range_m`, default 75 m) is applied after the radio.
+The application filter *awareness range* (`WorldConfig.v2x_range_m`, default 75 m) is applied after the radio to BSM, MAP,
+SPAT and VRUAM, measured from the transmitter. A **DENM is filtered by its own relevance distance**, measured from the
+event position (a hazard that is relevant 120 m around the event is not blocked by the 75 m BSM range).
 
 ## 2. Equations and parameters
 For a link of distance `d` (m) between transmitter and receiver:
@@ -22,8 +25,9 @@ For a link of distance `d` (m) between transmitter and receiver:
 3. **Receive margin.** `m = P_rx − S`, sensitivity `S = −85 dBm`. (Earlier code called this "SNR margin": it is not an SNR —
    there is no noise floor and no interference.)
 4. **Channel term.** `p_channel = 1 / (1 + exp(−k·m))`, `k = 2.0 per dB`.
-5. **MAC term (EXPERIMENTAL).** `p_mac = max(0.35, exp(−0.005·(N−1)))`, `N` = stations (vehicles, RSUs, VRUs)
-   within 300 m of the transmitter, including itself.
+5. **MAC term (EXPERIMENTAL).** `p_mac = max(0.35, exp(−0.005·(N−1)))`, `N` = stations (vehicles, RSUs, VRUs, active hazard
+   sources) within 300 m of the transmitter, including itself. Every message type in one update sees the same contention
+   domain (before 2026-11-03 a BSM counted vehicles only; see the CHANGELOG).
 6. **Decision.** One uniform draw: `delivered = U < p_channel · p_mac`. Co-located stations (< 0.5 m) are always delivered.
 7. **LOS/NLOS.** NLOS if another registered **vehicle** lies within 2.5 m of the segment between the two stations.
    Buildings are not modelled, so in sparse traffic nearly every link is LOS (S20).

@@ -25,7 +25,8 @@ man = json.load(open(run + "manifest.json"))
 stations = pd.json_normalize([s | {"frame": r["frame"], "sim_time": r["sim_time"]}
                               for r in map(json.loads, open(run + "stations.jsonl")) for s in r["stations"]])
 cols = man["formats"]["v2x_links"]["columns"]
-links = pd.DataFrame([row for line in gzip.open(run + "v2x_links.jsonl.gz", "rt") for row in json.loads(line)["rows"]], columns=cols)
+from src.recording.recorder import iter_link_rows          # tolerates a run that is still open or was cut off by a crash
+links = pd.DataFrame([r for _f, _t, r in iter_link_rows(run + "v2x_links.jsonl.gz", cols)])
 links.groupby("msg_type").delivered.mean()      # reception per message type; drop_cause says why a packet was lost
 ```
 `delivered` means "reached the receiver's application": a packet the radio delivered but that is beyond the awareness range has
@@ -41,9 +42,11 @@ links.groupby("msg_type").delivered.mean()      # reception per message type; dr
   depends on absolute world time; CARLA/TM float behaviour. A world reload before every run and frame-scheduled commands (handoff Phase 7)
   would be needed for bit-identical repeats. Treat single-vehicle outcomes as seed-dependent and aggregate over several seeds.
 - Seeds set: master (spawns), Traffic Manager, pedestrians (`world.set_pedestrians_seed`), driver profiles (seed + 2), V2X penetration (seed + 1),
-  DSRC channel (42, `DSRCConfig.random_seed`). All are in the manifest. Set the master seed with `/admin/connect {"seed": ...}` or `--seed`.
+  DSRC channel (master seed, since 2026-11-03; it used to be fixed at 42 for every master seed). All are in the manifest. Set the master seed with `/admin/connect {"seed": ...}` or `--seed`.
 
 ## Size
-`v2x_links.jsonl.gz` costs about 54 bytes per transmission attempt: 25 vehicles at 2 Hz is about 2 MB/minute (the first uncompressed
-version was 430 bytes per attempt, 28 MB for 30 s). Switch it off with `record_links: false` or `DSRCConfig.record_links = False`.
-LiDAR frames are about 480 kB each at the default settings: `record_lidar` is only for short runs.
+`v2x_links.jsonl.gz` costs about 54-61 bytes per transmission attempt. 25 vehicles + 5 RSUs at 2 Hz make about 850 attempts per
+update, i.e. about 100 000 per minute and **about 6 MB/minute** (the first uncompressed version was 430 bytes per attempt). It grows
+with the square of the number of V2X stations. Switch it off with `record_links: false` in `POST /admin/runs` (the server never
+passes its own `DSRCConfig`; with the flag off no link records of any message type are kept). LiDAR frames are about 505 kB each at
+the default settings (25 000 points x 21 bytes): `record_lidar` is only for short runs, and it keeps the sensors alive while recording.

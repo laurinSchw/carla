@@ -73,8 +73,8 @@ class V2XNetwork:
                             The server requires 1/(rate * dt) to be a whole number of frames.
             enable_cooperative_perception: Enable sensor data sharing.
             world: CARLA World instance (optional, auto-detected on first register).
-            dsrc_config: DSRCConfig for the IEEE 802.11p channel model. When None,
-                         ETSI EN 302 663 Class A OBU defaults are used.
+            dsrc_config: DSRCConfig for the IEEE 802.11p channel model. When None, the project defaults of
+                         ``DSRCConfig`` are used (not verified against any standard, see docs/science/model.md).
         """
         self.max_range: Optional[float] = max_range
         self.update_rate_hz = update_rate_hz

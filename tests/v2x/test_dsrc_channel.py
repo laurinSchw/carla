@@ -59,50 +59,12 @@ def _bsm(vehicle_id: int, x: float = 0.0, y: float = 0.0, speed: float = 10.0) -
     )
 
 
-def _run_n_trials(
-    n: int,
-    distance_m: float,
-    config: DSRCConfig,
-    nlos: bool = False,
-) -> float:
-    """
-    Run n independent trials for a single (sender, receiver) pair at the given
-    distance and return the empirical PRR.  Uses a fresh channel per call so
-    the seed produces a fresh sample sequence.
-    """
-    delivered = 0
-    for seed in range(n):
-        cfg = DSRCConfig(
-            tx_power_dbm=config.tx_power_dbm,
-            antenna_gain_dbi=config.antenna_gain_dbi,
-            rx_sensitivity_dbm=config.rx_sensitivity_dbm,
-            path_loss_exponent_los=config.path_loss_exponent_los,
-            path_loss_exponent_nlos=config.path_loss_exponent_nlos,
-            shadowing_std_los_db=config.shadowing_std_los_db,
-            shadowing_std_nlos_db=config.shadowing_std_nlos_db,
-            channel_busy_ratio=0.0,   # no contention so only PHY is tested
-            enable_nlos_model=False,  # controlled externally
-            random_seed=seed,
-        )
-        channel = DSRCChannel(cfg)
-
-        # Use internal PRR method for a single pair (isolate PHY from geometry)
-        prr = channel._compute_prr(distance_m, nlos, n_contenders=1)
-        if channel._rng.random() < prr:
-            delivered += 1
-    # PRR approximation from sigmoid (not stochastic) for the purpose of tests
-    # Use the direct computation from a single channel with a fixed seed instead
-    channel = DSRCChannel(config)
-    prr_direct = channel._compute_prr(distance_m, nlos, n_contenders=1)
-    return prr_direct
-
-
 # ── DSRCConfig tests ───────────────────────────────────────────────────────────
 
 class TestDSRCConfig(unittest.TestCase):
 
-    def test_default_tx_power_is_etsi_class_a(self):
-        """Default TX power must be 23 dBm per ETSI EN 302 663 §4."""
+    def test_default_tx_power_is_23_dbm(self):
+        """Pins the project default (23 dBm). Its ETSI attribution is unverified (docs/science/model.md): this is not a standards test."""
         cfg = DSRCConfig()
         self.assertEqual(cfg.tx_power_dbm, 23.0)
 
@@ -179,10 +141,9 @@ class TestDSRCChannelPhysics(unittest.TestCase):
         """
         PRR must monotonically decrease with distance at fixed σ=0, LOS.
 
-        With ETSI EN 302 663 defaults (TX=23 dBm, sensitivity=-85 dBm,
-        n_LOS=2.0, L0≈67.9 dB at 10 m), the sensitivity crossover is ~1.6 km.
-        PRR is saturated at 1.0 well below 1 km, so we test near and past the
-        crossover point where the sigmoid produces a strict ordering.
+        This test uses its own configuration (see ``_no_shadow_config``), not the production defaults, whose
+        sensitivity crossover is about 830 m LOS (docs/science/model.md). PRR is saturated at 1.0 far below the
+        crossover, so we test near and past it, where the sigmoid produces a strict ordering.
         """
         cfg = self._no_shadow_config()
         channel = DSRCChannel(cfg)

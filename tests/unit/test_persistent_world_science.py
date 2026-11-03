@@ -15,6 +15,7 @@ from tests.unit.carla_stub import Recorder, make_carla_module
 SIM = "carla-tick"
 
 from types import SimpleNamespace as _NS
+from types import SimpleNamespace as NS
 NS_SNAPSHOT = _NS(find=lambda i: None)
 
 
@@ -155,7 +156,7 @@ def test_stopping_the_server_closes_an_open_run_with_a_complete_manifest(env):
     assert m["complete"] is True and m["end_frame"] > m["start_frame"]
 
 
-def test_links_are_recorded_only_when_asked_and_without_v2x_no_links_file_rows(env):
+def test_a_run_without_v2x_writes_stations_but_no_link_rows(env):
     rec, make, _ = env
     srv = make(v2x_enabled=False)
     run = srv.submit(srv.start_run, "no v2x").result(5)
@@ -393,3 +394,122 @@ def test_hazards_can_be_listed_from_another_thread_while_they_are_published_and_
         net._expire_denms(float(i) + 0.6)
     stop.set(); t.join()
     assert errors == []
+
+
+# ── behaviours the review broke on purpose without any test noticing ───────────
+
+def test_random_streams_are_the_documented_seed_offsets_and_independent(env):
+    import random as _random
+    from src.traffic.drivers import DriverAssigner
+    rec, make, _ = env
+    srv = make(seed=5)
+    assert srv._v2x_rng is not srv._rng and srv._drivers._rng is not srv._rng and srv._drivers._rng is not srv._v2x_rng
+    assert srv._rng.random() == _random.Random(5).random()
+    assert srv._v2x_rng.random() == _random.Random(6).random()                       # seed + 1: penetration draws
+    assert srv._drivers.next_profile() == DriverAssigner(srv.config.driver_mix, 7).next_profile()   # seed + 2: drivers
+    assert srv.v2x_network._dsrc_channel.config.random_seed == 5                      # the channel follows the master seed
+
+
+def test_the_client_v2x_payload_is_built_from_received_messages_not_from_ground_truth(env):
+    """Review: switching spat_inbox/vruam_inbox to the senders' own dicts survived every test."""
+    from src.v2x.messages import SPATMessage, SPATMovementState, VRUAwarenessMessage, VRUProfile
+    rec, make, _ = env
+    srv = make()
+    session = srv.sessions.create_session("c", "127.0.0.1", "vehicle.test.car0", None)
+    actor_id = srv.submit(srv.spawn_client_vehicle, session.session_id, "vehicle.test.car0").result(5)
+
+    def spat(i):
+        return SPATMessage(intersection_id=i, intersection_name=f"i{i}", timestamp=1.0,
+                           states=[SPATMovementState(0, "protectedMovementAllowed", 1.0, 3.0, 2.0)])
+
+    def vru(i):
+        return VRUAwarenessMessage(station_id=i, timestamp=1.0, vru_profile=VRUProfile.PEDESTRIAN, position=(5.0, 5.0, 0.0),
+                                   speed=1.0, heading=0.0, motion_state="moving")
+
+    class Net:
+        spat_messages = {1: spat(1), 2: spat(2)}                      # what RSUs SEND (ground truth)
+        vru_messages = {900: vru(900), 901: vru(901)}
+        spat_inbox = {actor_id: {2: spat(2)}}                         # what this vehicle RECEIVED
+        map_inbox = {actor_id: {2: object()}}
+        vruam_inbox = {actor_id: {901: vru(901)}}
+        vehicles = {actor_id: object()}
+
+        def get_bsm(self, vid):
+            return NS(vehicle_id=vid, x_m=0.0, y_m=0.0, z_m=0.0, speed=1.0, heading=0.0)
+
+        def get_neighbors(self, vid):
+            return []
+
+        def get_threats(self, vid):
+            return []
+
+        def get_distance(self, a, b):
+            return 1.0
+
+        def get_rsu(self, iid):
+            return NS(config=NS(position=(10.0, 0.0, 0.0)))
+
+    srv.v2x_network = Net()
+    data = srv.submit(srv._build_v2x_data, session.session_id).result(5)
+    assert [s["intersection_id"] for s in data["spat_nearby"]] == [2]
+    assert [v["station_id"] for v in data["vru_nearby"]] == [901] and data["map_received"] == [2]
+
+
+def test_one_rsu_is_created_per_traffic_light_group_with_stable_ids(env):
+    """Review: grouping by single light (key = tl.id) survived; only the centroid helper was tested."""
+    rec, make, _ = env
+    srv = make()
+
+    class Light:
+        def __init__(self, i, group, x):
+            self.id, self._group, self._x = i, group, x
+
+        def get_group_traffic_lights(self):
+            return [l for l in LIGHTS if l._group == self._group and l is not self]
+
+        def get_transform(self):
+            return NS(location=NS(x=self._x, y=0.0, z=0.0))
+
+    LIGHTS = [Light(40, "B", 100.0), Light(10, "A", 0.0), Light(30, "B", 110.0), Light(20, "A", 10.0), Light(50, "C", 500.0)]
+    srv.world = NS(get_actors=lambda: NS(filter=lambda pattern: list(LIGHTS)))
+    srv._init_v2x()
+    rsus = srv.v2x_network.get_rsus()
+    assert sorted(rsus) == [1, 2, 3]                                       # 3 junction groups, not 5 lights
+    assert [len(rsus[i]._traffic_lights) for i in (1, 2, 3)] == [2, 2, 1]
+    assert [rsus[i].config.position[0] for i in (1, 2, 3)] == [5.0, 105.0, 500.0]   # group A (min id 10), B (30), C (50)
+
+
+def test_a_client_vehicle_is_a_v2x_station_while_it_lives_and_not_after(env):
+    rec, make, _ = env
+    srv = make()
+    session = srv.sessions.create_session("c", "127.0.0.1", "vehicle.test.car0", None)
+    actor_id = srv.submit(srv.spawn_client_vehicle, session.session_id, "vehicle.test.car0").result(5)
+    assert actor_id in srv.v2x_network.vehicles
+    srv.submit(srv.despawn_client_vehicle, session.session_id).result(5)
+    assert actor_id not in srv.v2x_network.vehicles
+
+
+def test_background_vehicles_are_unregistered_from_v2x_when_they_are_despawned(env):
+    rec, make, _ = env
+    srv = make()
+    srv.submit(srv.spawn_background_traffic, 4).result(5)
+    assert len(srv.v2x_network.vehicles) == 4
+    srv.submit(srv.despawn_background_traffic).result(5)
+    assert srv.v2x_network.vehicles == {}
+
+
+def test_recorded_stations_say_which_vehicles_are_v2x_equipped(env, tmp_path):
+    """Review: `v2x_equipped` hard-wired to True survived."""
+    rec, make, _ = env
+    srv = make(v2x_penetration_rate=0.0, seed=1)
+    srv.submit(srv.spawn_background_traffic, 5).result(5)
+    run = srv.submit(srv.start_run, "equipped").result(5)
+    session = srv.sessions.create_session("c", "127.0.0.1", "vehicle.test.car0", None)
+    srv.submit(srv.spawn_client_vehicle, session.session_id, "vehicle.test.car0").result(5)
+    assert _wait(lambda: srv.recorder.counts["stations.jsonl"] >= 2)
+    srv.submit(srv.stop_run).result(5)
+    last = [json.loads(l) for l in (Path(run["path"]) / "stations.jsonl").read_text().splitlines()][-1]["stations"]
+    bg = [s for s in last if s["kind"] == "background"]
+    cl = [s for s in last if s["kind"] == "client"]
+    assert bg and all(s["v2x_equipped"] is False for s in bg)              # penetration 0: nobody but the client is a station
+    assert cl and all(s["v2x_equipped"] is True for s in cl)
