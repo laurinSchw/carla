@@ -43,6 +43,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY start_server.py .
 
+# Recorded runs name the code version: docker compose build --build-arg GIT_SHA=$(git rev-parse --short HEAD)
+ARG GIT_SHA=nogit
+ENV GIT_SHA=$GIT_SHA
+
 # Create logs directory
 RUN mkdir -p logs data runs
 

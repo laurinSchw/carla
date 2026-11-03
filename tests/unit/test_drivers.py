@@ -68,8 +68,8 @@ def test_apply_profile_sets_every_setting_on_that_vehicle():
 
 
 def test_a_missing_tm_method_is_reported_not_raised():
-    failed = apply_profile(TM(fail={"keep_right_rule_percentage"}), NS(id=1), PROFILES["normal"])
-    assert failed == ["keep_right_rule_percentage"]
+    failed = apply_profile(TM(fail={"keep_slow_lane_rule_percentage"}), NS(id=1), PROFILES["normal"])
+    assert failed == ["keep_slow_lane_rule_percentage"]
 
 
 # ── advisory ─────────────────────────────────────────────────────────────────

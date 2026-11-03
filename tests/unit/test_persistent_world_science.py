@@ -158,7 +158,8 @@ def test_links_are_recorded_only_when_asked_and_without_v2x_no_links_file_rows(e
     run = srv.submit(srv.start_run, "no v2x").result(5)
     assert _wait(lambda: srv.recorder.counts["stations.jsonl"] >= 2)
     srv.submit(srv.stop_run).result(5)
-    assert (Path(run["path"]) / "v2x_links.jsonl").read_text() == ""
+    import gzip
+    assert gzip.decompress((Path(run["path"]) / "v2x_links.jsonl.gz").read_bytes()) == b""
 
 
 def test_advisory_slows_a_threatened_vehicle_then_restores_its_own_speed(env):

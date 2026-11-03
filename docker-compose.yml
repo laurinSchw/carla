@@ -13,6 +13,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        GIT_SHA: ${GIT_SHA:-nogit}
       #  HTTP_PROXY: "http://172.18.167.75:81"
       #  HTTPS_PROXY: "http://172.18.167.75:81"
         NO_PROXY: "localhost,127.0.0.1"

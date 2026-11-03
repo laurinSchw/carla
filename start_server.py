@@ -69,6 +69,10 @@ def _parse_args() -> argparse.Namespace:
                    help="Disable V2X network")
     p.add_argument("--v2x-range", type=float, default=75.0,
                    help="V2X cooperative range in metres")
+    p.add_argument("--seed", type=int, default=42,
+                   help="Master random seed (spawns, Traffic Manager, pedestrians, drivers, channel)")
+    p.add_argument("--no-drivers", action="store_true", help="Disable seeded driver profiles (plain Traffic Manager)")
+    p.add_argument("--v2x-advisory", action="store_true", help="V2X-assisted slow-down for threatened vehicles")
     p.add_argument("--v2x-rate", type=float, default=2.0,
                    help="V2X update rate in Hz; 1/(rate*0.05 s) must be a whole number of frames")
     p.add_argument("--v2x-penetration", type=float, default=1.0,
@@ -120,6 +124,7 @@ def main() -> None:
         try:
             from src.server.persistent_world import PersistentCARLAServer
             from src.server.world_config import WorldConfig
+            from src.traffic.advisory import AdvisoryConfig
             world = PersistentCARLAServer(WorldConfig(
                 host=args.carla_host,
                 port=args.carla_port,
@@ -127,6 +132,9 @@ def main() -> None:
                 v2x_range_m=args.v2x_range,
                 v2x_penetration_rate=args.v2x_penetration,
                 v2x_update_rate_hz=args.v2x_rate,
+                seed=args.seed,
+                drivers_enabled=not args.no_drivers,
+                advisory=AdvisoryConfig(enabled=args.v2x_advisory),
                 tm_port=args.tm_port,
                 web_port=args.port,
             ))

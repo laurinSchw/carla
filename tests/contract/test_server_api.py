@@ -407,3 +407,16 @@ def test_run_endpoints_require_the_admin_token_and_a_running_world(client, world
     assert client.post("/admin/runs", json={"name": ""}, headers=AUTH).status_code == 422       # name must not be empty
     world._running = False
     assert client.post("/admin/runs", json={"name": "x"}, headers=AUTH).status_code == 503
+
+
+def test_connect_request_carries_seed_drivers_and_advisory_settings():
+    from src.server.admin_routes import ConnectRequest
+    from src.server.world_config import WorldConfig
+    from src.traffic.advisory import AdvisoryConfig
+    from src.traffic.drivers import DriverMix
+    req = ConnectRequest(carla_host="h", seed=7, drivers_enabled=False, driver_mix={"cautious": 1, "normal": 0, "aggressive": 0},
+                         advisory_enabled=True, advisory_trigger_level=2)
+    cfg = WorldConfig(host="h", seed=req.seed, drivers_enabled=req.drivers_enabled, driver_mix=DriverMix(**req.driver_mix),
+                      advisory=AdvisoryConfig(enabled=req.advisory_enabled, trigger_level=req.advisory_trigger_level))
+    assert cfg.seed == 7 and cfg.drivers_enabled is False and cfg.advisory.enabled and cfg.advisory.trigger_level == 2
+    assert cfg.driver_mix.weights() == [1.0, 0.0, 0.0]

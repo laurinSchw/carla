@@ -8,6 +8,11 @@
         lidar_meta.jsonl   (optional) one line per recorded LiDAR frame
         lidar/<sensor>/<frame>.bin   (optional) protocol-v3 frames at FULL resolution (never subsampled)
 
+``v2x_links.jsonl.gz`` is gzip-compressed and COLUMNAR (the first live recording of 25 vehicles was 28 MB in 30 s as one
+JSON object per link): each line is ``{"frame", "sim_time", "rows": [[...], ...]}`` and the column names are in
+``manifest.json`` under ``formats.v2x_links.columns``. No value is rounded. The file is flushed after every update, so it
+can be read while the run is in progress.
+
 Rules (handoff §4): every record carries ``frame`` and ``sim_time``; wall-clock time appears only in the manifest;
 values are written at full precision, never rounded or decimated; non-finite numbers become ``null``. With the same
 seed, configuration and command script the data files (not the manifest) are byte-identical — that is what
@@ -16,11 +21,13 @@ seed, configuration and command script the data files (not the manifest) are byt
 
 from __future__ import annotations
 
+import gzip
+import io
 import json
 import math
 import re
 import time
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -32,6 +39,7 @@ class RunAlreadyRecording(Exception):
 
 
 FILES = ("events.jsonl", "stations.jsonl", "v2x_links.jsonl")
+LINKS_FILE = "v2x_links.jsonl.gz"  # logical name "v2x_links.jsonl" in row_counts
 
 
 def _clean(value: Any) -> Any:
@@ -81,7 +89,15 @@ class RunRecorder:
         self.record_lidar = record_lidar
         self.counts: Dict[str, int] = {f: 0 for f in FILES}
         self.counts["lidar_frames"] = 0
-        self._files = {f: open(self.path / f, "w", encoding="utf-8", newline="\n") for f in FILES}
+        # gzip header: no file name, mtime 0 -> the compressed bytes depend only on the data (reproducible runs)
+        self._links_raw = open(self.path / LINKS_FILE, "wb")
+        self._files = {
+            f: (io.TextIOWrapper(gzip.GzipFile(filename="", mode="wb", fileobj=self._links_raw, compresslevel=3, mtime=0),
+                                 encoding="utf-8", newline="\n")
+                if f == "v2x_links.jsonl" else open(self.path / f, "w", encoding="utf-8", newline="\n"))
+            for f in FILES
+        }
+        self._link_columns: Optional[List[str]] = None
         self._lidar_meta = None
         self.closed = False
         self._manifest = {
@@ -101,10 +117,22 @@ class RunRecorder:
         self._line("stations.jsonl", {"frame": frame, "sim_time": sim_time, "stations": stations})
 
     def links(self, frame: int, sim_time: float, links: Iterable[Any]) -> None:
+        """One line per update; rows are lists in the fixed column order recorded in the manifest."""
         if not self.record_links:
             return
-        rows = [_clean(l) for l in links]
-        self._line("v2x_links.jsonl", {"frame": frame, "sim_time": sim_time, "links": rows})
+        links = list(links)
+        if links and self._link_columns is None:
+            first = links[0]
+            self._link_columns = [f.name for f in fields(first)] if is_dataclass(first) else list(first)
+            self._manifest.setdefault("formats", {})["v2x_links"] = {
+                "file": LINKS_FILE, "encoding": "gzip, JSON lines, columnar",
+                "line": {"frame": "int", "sim_time": "float", "rows": "list of rows; each row is a list in `columns` order"},
+                "columns": self._link_columns,
+            }
+            self._write_manifest(final=False)
+        cols = self._link_columns or []
+        rows = [[_clean(getattr(l, c) if is_dataclass(l) else l[c]) for c in cols] for l in links]
+        self._line("v2x_links.jsonl", {"frame": frame, "sim_time": sim_time, "rows": rows})
 
     def lidar_frame(self, info: dict, lf: Any) -> None:
         """Raw-listener hook for ``LidarManager``: the frame is written exactly as delivered (full resolution)."""
@@ -130,6 +158,7 @@ class RunRecorder:
             self.closed = True
             for f in self._files.values():
                 f.close()
+            self._links_raw.close()
             if self._lidar_meta is not None:
                 self._lidar_meta.close()
             self._manifest.update({"end_frame": frame, "end_sim_time": sim_time, "ended_wall_time_unix": self._wall(),
@@ -148,6 +177,8 @@ class RunRecorder:
         f = self._files[name]
         f.write(dumps(obj) + "\n")
         f.flush()  # a run can be read (tail -f, plots) while it is still being recorded; a crash loses at most one row
+        if name == "v2x_links.jsonl":
+            self._links_raw.flush()
         self.counts[name] += 1
 
     def _write_manifest(self, final: bool) -> None:
@@ -157,6 +188,7 @@ class RunRecorder:
         if not final:  # let readers see the data written so far
             for f in self._files.values():
                 f.flush()
+            self._links_raw.flush()
 
 
 def list_runs(root: Path) -> List[dict]:

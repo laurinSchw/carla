@@ -1,5 +1,6 @@
 """Run recorder: layout, stamping, precision, determinism (handoff §4 and §5.6)."""
 
+import gzip
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +22,14 @@ def make(tmp_path, name="My Run!", **kw):
 
 
 def lines(path):
-    return [json.loads(l) for l in Path(path).read_text().splitlines()]
+    path = Path(path)
+    if path.name.endswith(".gz"):
+        return [json.loads(l) for l in gzip.decompress(path.read_bytes()).decode().splitlines()]
+    return [json.loads(l) for l in path.read_text().splitlines()]
+
+
+def links_file(r):
+    return r.path / "v2x_links.jsonl.gz"
 
 
 def test_directory_name_manifest_and_files(tmp_path):
@@ -29,7 +37,7 @@ def test_directory_name_manifest_and_files(tmp_path):
     assert r.run_id == "20261103T120000Z_abcdef12_My-Run"
     m = json.loads((r.path / "manifest.json").read_text())
     assert m["start_frame"] == 100 and m["config"] == {"seed": 42} and "complete" not in m
-    for f in ("events.jsonl", "stations.jsonl", "v2x_links.jsonl"):
+    for f in ("events.jsonl", "stations.jsonl", "v2x_links.jsonl.gz"):
         assert (r.path / f).exists()
 
 
@@ -39,7 +47,7 @@ def test_every_record_is_stamped_and_files_have_no_wall_clock(tmp_path):
     r.stations(110, 5.5, [{"id": 7, "x_m": 1.0}])
     r.links(110, 5.5, [{"tx_id": 1}])
     r.stop(120, 6.0)
-    for f in ("events.jsonl", "stations.jsonl", "v2x_links.jsonl"):
+    for f in ("events.jsonl", "stations.jsonl", "v2x_links.jsonl.gz"):
         for row in lines(r.path / f):
             assert "frame" in row and "sim_time" in row
             assert not any("wall" in k for k in row)
@@ -70,7 +78,7 @@ def test_links_can_be_switched_off_and_runs_are_listed_newest_first(tmp_path):
     r = make(tmp_path, record_links=False)
     r.links(1, 0.05, [{"a": 1}])
     r.stop(2, 0.1)
-    assert (r.path / "v2x_links.jsonl").read_text() == ""
+    assert lines(links_file(r)) == []
     r2 = RunRecorder(tmp_path, "later", {}, start_frame=1, start_sim_time=0.0, git_sha="x",
                      utcnow=lambda: datetime(2026, 11, 4, tzinfo=timezone.utc))
     r2.stop(2, 0.1)
@@ -109,16 +117,16 @@ def _record_channel_run(root, seed):
         r.stations(frame, frame * 0.05, [{"id": i, "x_m": p[0], "y_m": p[1]} for i, p in pos.items()])
         r.links(frame, frame * 0.05, ch.last_links)
     r.stop(60, 3.0)
-    return {f: (r.path / f).read_bytes() for f in ("stations.jsonl", "v2x_links.jsonl")}
+    return {f: (r.path / f).read_bytes() for f in ("stations.jsonl", "v2x_links.jsonl.gz")}
 
 
 def test_same_seed_gives_byte_identical_data_files_and_a_different_seed_does_not(tmp_path):
     a = _record_channel_run(tmp_path / "a", 42)
     b = _record_channel_run(tmp_path / "b", 42)
     c = _record_channel_run(tmp_path / "c", 43)
-    assert a["stations.jsonl"] == b["stations.jsonl"] and a["v2x_links.jsonl"] == b["v2x_links.jsonl"]
-    assert a["v2x_links.jsonl"] != c["v2x_links.jsonl"]
-    assert len(a["v2x_links.jsonl"].splitlines()) == 5
+    assert a["stations.jsonl"] == b["stations.jsonl"] and a["v2x_links.jsonl.gz"] == b["v2x_links.jsonl.gz"]   # raw bytes
+    assert a["v2x_links.jsonl.gz"] != c["v2x_links.jsonl.gz"]
+    assert len(gzip.decompress(a["v2x_links.jsonl.gz"]).splitlines()) == 5
 
 
 def test_rows_are_readable_on_disk_while_the_run_is_still_open(tmp_path):
@@ -128,3 +136,29 @@ def test_rows_are_readable_on_disk_while_the_run_is_still_open(tmp_path):
     r.stations(2, 0.1, [])
     assert len(lines(r.path / "stations.jsonl")) == 1
     r.stop(3, 0.15)
+
+
+def test_links_are_columnar_with_the_column_names_in_the_manifest_and_nothing_rounded(tmp_path):
+    from src.v2x.dsrc_channel import LinkResult
+    r = make(tmp_path)
+    link = LinkResult(7, 0.35, 1, 2, "BSM", "V2V", 12.345678901234567, True, 23.0, 70.1, -1.5, -60.25, 24.75, 1.0, 0.9, 0.9, True, None)
+    r.links(7, 0.35, [link, link])
+    m = r.stop(8, 0.4)
+    cols = m["formats"]["v2x_links"]["columns"]
+    assert cols[:6] == ["frame", "sim_time", "tx_id", "rx_id", "msg_type", "link_type"] and len(cols) == 18
+    (line,) = lines(links_file(r))
+    assert line["frame"] == 7 and len(line["rows"]) == 2
+    row = dict(zip(cols, line["rows"][0]))
+    assert row["distance_m"] == 12.345678901234567 and row["drop_cause"] is None and row["delivered"] is True
+    assert json.loads((r.path / "manifest.json").read_text())["formats"]["v2x_links"]["file"] == "v2x_links.jsonl.gz"
+
+
+def test_columnar_gzip_is_much_smaller_than_one_json_object_per_link(tmp_path):
+    from src.v2x.dsrc_channel import LinkResult
+    r = make(tmp_path)
+    rows = [LinkResult(10, 0.5, i % 40, (i * 7) % 40, "BSM", "V2V", 10.0 + i * 0.37, True, 23.0, 70.0 + i * 0.01, -1.0,
+                       -60.0 - i * 0.01, 24.0, 1.0, 0.9, 0.9, i % 3 != 0, None if i % 3 else "channel_or_mac") for i in range(3000)]
+    r.links(10, 0.5, rows)
+    r.stop(11, 0.55)
+    naive = sum(len(dumps(l)) + 1 for l in rows)
+    assert links_file(r).stat().st_size < naive / 5

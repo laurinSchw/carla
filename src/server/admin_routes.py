@@ -24,6 +24,8 @@ from pydantic import BaseModel, Field, ValidationError
 from src.recording.recorder import RunAlreadyRecording
 from src.server.route_utils import on_sim_thread
 from src.server.world_config import WorldConfig
+from src.traffic.advisory import AdvisoryConfig
+from src.traffic.drivers import DriverMix
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,11 @@ class ConnectRequest(BaseModel):
     v2x_range: float = Field(default=75.0, ge=10.0, le=500.0)
     v2x_penetration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
     v2x_update_rate_hz: float = Field(default=2.0, gt=0, le=20.0)
+    seed: int = Field(default=42, description="Master seed: spawns, Traffic Manager, pedestrians, driver profiles, channel.")
+    drivers_enabled: bool = Field(default=True, description="Seeded driver profiles (cautious/normal/aggressive) for background traffic.")
+    driver_mix: dict = Field(default_factory=lambda: {"cautious": 0.2, "normal": 0.6, "aggressive": 0.2})
+    advisory_enabled: bool = Field(default=False, description="V2X-assisted slow-down for vehicles that received threatening BSMs.")
+    advisory_trigger_level: int = Field(default=3, ge=1, le=4)
     tm_port: int = Field(default=8001, ge=1024, le=65535)
 
 
@@ -125,10 +132,15 @@ async def connect_world(req: ConnectRequest):
             v2x_range_m=req.v2x_range,
             v2x_penetration_rate=req.v2x_penetration_rate,
             v2x_update_rate_hz=req.v2x_update_rate_hz,
+            seed=req.seed,
+            drivers_enabled=req.drivers_enabled,
+            driver_mix=DriverMix(**req.driver_mix),
+            advisory=AdvisoryConfig(enabled=req.advisory_enabled, trigger_level=req.advisory_trigger_level),
             tm_port=req.tm_port,
         )
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors(include_url=False, include_context=False))
+    except (ValidationError, TypeError, ValueError) as exc:
+        detail = exc.errors(include_url=False, include_context=False) if isinstance(exc, ValidationError) else str(exc)
+        raise HTTPException(status_code=422, detail=detail)
 
     global _connect_state, _connect_error
     with _connect_lock:

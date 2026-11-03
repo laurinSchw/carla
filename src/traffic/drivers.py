@@ -12,7 +12,8 @@ TM semantics used (CARLA 0.9.x Traffic Manager API, to be confirmed against 0.9.
   * ``vehicle_percentage_speed_difference(actor, pct)``: positive = slower than the speed limit by pct %, NEGATIVE = faster.
   * ``distance_to_leading_vehicle(actor, m)``: minimum gap to the vehicle ahead in metres.
   * ``random_left/right_lanechange_percentage(actor, pct)``: chance of an unprompted lane change.
-  * ``keep_right_rule_percentage``, ``ignore_lights_percentage``, ``ignore_signs_percentage``: probabilities in %.
+  * ``keep_slow_lane_rule_percentage``, ``ignore_lights_percentage``, ``ignore_signs_percentage``: probabilities in %.
+    (``keep_right_rule_percentage`` does NOT exist in CARLA 0.9.16: checked against the live TM, it is ``keep_slow_lane_rule_percentage``.)
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ class DriverProfile:
     follow_distance_m: float    # minimum gap to the leader
     lane_change_left_pct: float
     lane_change_right_pct: float
-    keep_right_pct: float
+    keep_slow_lane_pct: float
     ignore_lights_pct: float = 0.0
     ignore_signs_pct: float = 0.0
 
@@ -43,7 +44,7 @@ class DriverProfile:
             "distance_to_leading_vehicle": self.follow_distance_m,
             "random_left_lanechange_percentage": self.lane_change_left_pct,
             "random_right_lanechange_percentage": self.lane_change_right_pct,
-            "keep_right_rule_percentage": self.keep_right_pct,
+            "keep_slow_lane_rule_percentage": self.keep_slow_lane_pct,
             "ignore_lights_percentage": self.ignore_lights_pct,
             "ignore_signs_percentage": self.ignore_signs_pct,
         }
@@ -52,11 +53,11 @@ class DriverProfile:
 #: archetypes (project defaults, uncalibrated)
 PROFILES: Mapping[str, DriverProfile] = {
     "cautious": DriverProfile("cautious", speed_pct=15.0, follow_distance_m=4.5, lane_change_left_pct=2.0,
-                              lane_change_right_pct=2.0, keep_right_pct=80.0),
+                              lane_change_right_pct=2.0, keep_slow_lane_pct=80.0),
     "normal": DriverProfile("normal", speed_pct=0.0, follow_distance_m=2.5, lane_change_left_pct=8.0,
-                            lane_change_right_pct=8.0, keep_right_pct=50.0),
+                            lane_change_right_pct=8.0, keep_slow_lane_pct=50.0),
     "aggressive": DriverProfile("aggressive", speed_pct=-25.0, follow_distance_m=1.2, lane_change_left_pct=30.0,
-                                lane_change_right_pct=20.0, keep_right_pct=15.0),
+                                lane_change_right_pct=20.0, keep_slow_lane_pct=15.0),
 }
 
 #: per-vehicle jitter applied to the speed offset so that vehicles of one archetype still differ (uniform, +- this many %)
