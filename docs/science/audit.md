@@ -1,6 +1,6 @@
 # Audit — Scientific Accuracy & Code-Quality Backlog
 
-> **STALE — do not trust the "RESOLVED" claims.** REFACTOR_HANDOFF.md §3.2 (S1) shows the P2 calibration
+> **SUPERSEDED by `docs/science/model.md`.** Do not trust the "RESOLVED" claims. REFACTOR_HANDOFF.md §3.2 (S1) shows the P2 calibration
 > numbers are false (code gives -56.9 / -63.9 / -78.5 dBm, not -71 / -77 / -87). Paths below use
 > pre-merge names (`src/v2v/…`). To be superseded by `docs/science/model.md` (Phase 3).
 

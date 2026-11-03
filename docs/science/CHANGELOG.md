@@ -215,3 +215,12 @@ ETSI CAM triggering rules are not implemented.
 ### S12 — reproducible update-rate statistic
 `stats['measured_sim_update_hz']` is computed from simulation time (equals the configured rate on a correct gate);
 `measured_update_hz` stays wall-clock and depends on the real-time factor.
+
+### S1 / S5 / S6 / S15 / S16 / S20 — channel honesty (documentation and labels; no output change)
+`docs/science/model.md` now lists every equation, default and its status, and a table generated from the code,
+pinned by `tests/v2x/test_channel_model_table.py`. Removed or corrected: the "P_rx ≈ −71/−77/−87 dBm" calibration claim
+(code: −56.9 / −63.9 / −78.5 dBm), the "meaningful 10–150 m PRR variation" claim, the Bianchi / Campolo / "ETSI TR 102 863"
+citations for the MAC term, "ETSI EN 302 663 Class A 23 dBm" and "ETSI TR 101 607 33 dBm" as established facts (now *unverified project
+defaults*), and the NLOS docstring (vehicles only, no buildings). The MAC term is labelled EXPERIMENTAL / uncalibrated; `channel_busy_ratio` is
+documented as unused. DENM cause-code numbers are marked unverified. **Not changed (open):** i.i.d. shadowing and sigmoid-then-Bernoulli (S5),
+the MAC placeholder constants (S6), building occlusion (S20), a calibration against a cited dataset (needs your decision D5).

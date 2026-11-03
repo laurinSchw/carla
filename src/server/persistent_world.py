@@ -240,7 +240,7 @@ class PersistentCARLAServer:
                 self.v2x_network.register_rsu(rsu)
             logger.info(
                 "V2X network initialised: range=%.0f m, %d RSUs",
-                self.v2x_range, len(self.v2x_network._rsus),
+                self.v2x_range, self.v2x_network.rsu_count,
             )
         except ImportError:
             logger.warning("V2X module not available — V2X disabled")
@@ -630,8 +630,8 @@ class PersistentCARLAServer:
             "client_vehicles": len(self._client_vehicles),
             "v2x_enabled": v2x is not None,
             "v2x_range": self.v2x_range if v2x else 0,
-            "rsu_count": len(getattr(v2x, "_rsus", {})),
-            "vru_count": len(getattr(v2x, "_vrus", {})),
+            "rsu_count": v2x.rsu_count if v2x else 0,
+            "vru_count": v2x.vru_count if v2x else 0,
         }
 
     def get_vehicle_telemetry(self, session_id: str) -> Optional[dict]:
@@ -666,7 +666,7 @@ class PersistentCARLAServer:
         # SPAT / MAP this vehicle actually RECEIVED through the channel (not a radius test)
         spat_nearby = []
         for iid, spat in net.spat_inbox.get(vid, {}).items():
-            rsu = net._rsus.get(iid)
+            rsu = net.get_rsu(iid)
             dist = (
                 math.hypot(vx - rsu.config.position[0], vy - rsu.config.position[1])
                 if rsu is not None else None

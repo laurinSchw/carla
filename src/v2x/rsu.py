@@ -6,13 +6,14 @@ Implements a stationary ITS station that:
   - Reads CARLA TrafficLight state and produces live SPAT messages.
 
 The RSU transmits at the same 2 Hz cadence as V2V BSM beacons.
-Per ETSI TR 101 607, RSUs use 33 dBm TX power (vs. 23 dBm for OBUs)
-and cover a 300 m intersection radius.
+RSUs transmit with a configurable TX power (default 33 dBm vs. 23 dBm for OBUs). The 33 dBm figure
+and the ETSI TR 101 607 attribution are UNVERIFIED project defaults (handoff S16). Reception is
+decided by the DSRC channel model and the network's awareness range, not by a coverage radius.
 
 IEEE / ETSI references:
   ETSI TS 103 301 v2.1.1  — MAP + SPAT (infrastructure services)
   SAE J2735-202007 §7.18  — SPaTIntersectionState
-  ETSI TR 101 607 v1.1.1  — ITS-G5 RSU deployment guidelines
+  ETSI TR 101 607 v1.1.1  — cited for the RSU power default; NOT verified to say so
 """
 
 from __future__ import annotations
@@ -61,13 +62,12 @@ class RSUConfig:
     """
     Road Side Unit configuration.
 
-    Defaults follow ETSI TR 101 607 v1.1.1 for ITS-G5 RSU deployments:
-      TX power 33 dBm (higher than OBU 23 dBm to cover the full intersection).
-      Broadcast range 300 m — typical urban intersection sight distance.
+    Project defaults (not verified against ETSI TR 101 607): TX power 33 dBm, higher than the
+    23 dBm OBU default. ``broadcast_range_m`` is informational only.
     """
     intersection_id: int
     position: tuple                       # (x, y, z) CARLA world coordinates
-    tx_power_dbm: float = 33.0            # ETSI TR 101 607 RSU max
+    tx_power_dbm: float = 33.0            # project default, unverified (S16)
     broadcast_range_m: float = 300.0      # Informational service-area radius; reception is decided by the channel + awareness range (S4/S13)
     map_revision: int = 1
 

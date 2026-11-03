@@ -1,31 +1,28 @@
 """
-DSRC/WAVE (IEEE 802.11p) Channel Model for V2X/V2V Simulation
+DSRC/WAVE (IEEE 802.11p) Channel Model for V2X Simulation
 
-Models the physical medium characteristics of IEEE 802.11p (DSRC/WAVE) as used
-in SAE J2735 BSM broadcasts. Implements:
+A deliberately simple, seeded, in-process packet-delivery model used for every message
+type (BSM, MAP, SPAT, VRUAM). See docs/science/model.md for every equation, parameter,
+its status (project-defined / unverified) and the known limitations. Summary:
 
-  - Log-distance path loss with log-normal shadowing
-    Calibrated to ETSI EN 302 663 and ETSI EN 302 895 parameters.
-  - CSMA/CA channel contention modelled via the channel busy ratio (CBR).
-  - Optional LOS/NLOS distinction via 2-D geometry.
-  - Packet Reception Rate (PRR) via a sigmoid SNR-margin curve calibrated
-    against Sommer et al. (2011) and the WINNER+ B1 urban channel model.
+  - P_rx = P_tx + 2·G − [L0 + 10·n·log10(d/d0) + X], X ~ N(0, σ²) drawn i.i.d. per packet
+    (no spatial or temporal correlation). L0 is free-space loss at d0 = 10 m.
+  - rx margin = P_rx − sensitivity (NOT an SNR: no noise floor, no interference).
+  - p_channel = logistic(k · margin);  p_mac = EXPERIMENTAL contention term (uncalibrated);
+    delivered = Bernoulli(p_channel · p_mac), one draw per (tx, rx, message).
+  - LOS/NLOS: NLOS if another registered vehicle lies within 2.5 m of the tx→rx segment.
+    Buildings are ignored.
+  - Everything is delivered in the same tick (zero latency) — a modelling assumption.
 
-All computation is in-process and deterministic (seeded RNG). No threads,
-no external broker, no connections to open or close. Call broadcast_all()
-once per V2V update tick, then query get_received() per vehicle.
+The default exponents, shadowing σ, sensitivity, TX power and sigmoid steepness are PROJECT
+DEFAULTS, not values fitted to or verified against a published measurement set. The works
+below are the intended background; which numbers they actually support has NOT been checked:
+  - Paier et al.: V2V channel measurements at 5.2 GHz (Wireless Personal Communications).
+  - Sommer et al. (2011): empirical 802.11p shadowing model, WONS.
+  - ETSI EN 302 663 (ITS-G5 access layer): the 23 dBm default is not verified against it.
 
-Reference parameters follow ETSI EN 302 663 §4 for ITS-G5 Class A OBU:
-  TX power: 23 dBm ERP, carrier: 5.9 GHz, bandwidth: 10 MHz.
-
-Physical model references:
-  - Paier et al. (2008): "Characterization of vehicle-to-vehicle radio channels
-    from measurements at 5.2 GHz." Wireless Personal Communications.
-  - Sommer et al. (2011): "A computationally inexpensive empirical model of IEEE
-    802.11p radio shadowing in urban environments." WONS.
-  - Bianchi (2000): "Performance analysis of the IEEE 802.11 distributed
-    coordination function." IEEE J. Sel. Areas Commun.
-  - ETSI EN 302 663 V1.3.1 (2020): "ITS; Access layer specification."
+All computation is in-process and deterministic (seeded RNG). No threads, no external
+broker. Call broadcast_all() once per update tick, then query get_received() per vehicle.
 """
 
 import math
@@ -92,41 +89,31 @@ class DSRCConfig:
     """
     DSRC/WAVE channel model parameters.
 
-    Defaults follow ETSI EN 302 663 §4 (ITS-G5 Class A OBU).
-    Researchers may tune these to explore path loss conditions, shadowing
-    intensity, TX power, or channel congestion without changing simulation logic.
-
-    Channel busy ratio (CBR) calibration:
-      At 2 Hz BSM rate, BSM payload ~200 bytes @ 3 Mbps:
-        packet_duration ≈ 200*8 / 3e6 ≈ 0.53 ms
-        CBR ≈ N_vehicles × packet_duration / beacon_interval
-        For 15 vehicles at 2 Hz: CBR ≈ 15 × 0.53ms / 500ms ≈ 0.016 (1.6%)
-      Default CBR=0.15 represents a denser deployment (≈140 vehicles at 2 Hz)
-      consistent with ETSI ETSI TR 103 439 congestion scenarios.
+    ALL defaults are project defaults — plausible for 5.9 GHz urban V2V but not fitted to or
+    verified against a cited dataset (docs/science/model.md). Tune them to explore path loss,
+    shadowing, TX power or congestion without changing simulation logic.
     """
 
     # ── Transmitter / receiver ────────────────────────────────────────────────
-    tx_power_dbm: float = 23.0        # ETSI EN 302 663 Class A max: 23 dBm ERP
+    tx_power_dbm: float = 23.0        # project default OBU power (not verified against ETSI EN 302 663)
     antenna_gain_dbi: float = 2.0     # Omnidirectional OBU antenna gain (TX + RX each)
     rx_sensitivity_dbm: float = -85.0 # 802.11p typical receiver sensitivity floor
 
     # ── Path loss model (log-distance + log-normal shadowing) ────────────────
-    # Calibrated for realistic PRR variation within 10-150m V2V ranges.
-    # Higher exponents and shadowing create meaningful differentiation:
-    #   - At 50m LOS: P_rx ≈ -71 dBm → SNR margin ≈ +14 dB → PRR ≈ 0.98
-    #   - At 100m LOS: P_rx ≈ -77 dBm → SNR margin ≈ +8 dB → PRR ≈ 0.92
-    #   - At 150m NLOS: P_rx ≈ -87 dBm → SNR margin ≈ -2 dB → PRR ≈ 0.45
-    path_loss_exponent_los: float = 2.3    # Urban LOS (measured: 2.1-2.5)
-    path_loss_exponent_nlos: float = 3.2   # Urban NLOS with buildings
-    shadowing_std_los_db: float = 5.5      # Increased LOS shadowing
-    shadowing_std_nlos_db: float = 8.0     # Heavy NLOS shadowing
+    # What these defaults actually give (no shadowing; reproduced by tests/v2x/test_channel_model_table.py):
+    #   P_rx at 50 m LOS = -56.9 dBm, 100 m LOS = -63.9 dBm, 150 m NLOS = -78.5 dBm
+    #   LOS reaches the -85 dBm floor at ~830 m, NLOS at ~240 m. Inside the 75 m awareness range
+    #   the LOS link is effectively lossless; losses appear for NLOS beyond ~100 m and for
+    #   LOS only at several hundred metres. (Earlier comments claiming -71/-77/-87 dBm were wrong.)
+    path_loss_exponent_los: float = 2.3    # project default (urban LOS literature range is roughly 2-2.5; unverified)
+    path_loss_exponent_nlos: float = 3.2   # project default
+    shadowing_std_los_db: float = 5.5      # project default, i.i.d. per packet
+    shadowing_std_nlos_db: float = 8.0     # project default, i.i.d. per packet
 
-    # ── CSMA/CA contention (channel busy ratio) ───────────────────────────────
-    # CBR ∈ [0, 1]: fraction of time the channel is sensed busy.
-    # 0.0 = empty channel (no contention), 1.0 = fully saturated.
-    # NOTE: This parameter is now informational only. The actual contention
-    # model uses a density-aware approach calibrated to 802.11p measurements.
-    # See _csma_success_prob() for the implementation.
+    # ── Channel busy ratio (UNUSED) ───────────────────────────────────────────
+    # Not read by the model. The contention term depends only on the number of stations
+    # within carrier-sense range (see _csma_success_prob, EXPERIMENTAL). Kept so existing
+    # configs still construct; reported in log lines only.
     channel_busy_ratio: float = 0.15
 
     # ── LOS/NLOS detection ────────────────────────────────────────────────────
@@ -136,7 +123,7 @@ class DSRCConfig:
 
     # ── PRR sigmoid steepness ─────────────────────────────────────────────────
     # Larger values produce a sharper PRR transition around the sensitivity floor.
-    # k=2.0 matches Sommer et al. (2011) empirical calibration.
+    # k = 2.0 per dB is a project choice (not verified against Sommer et al. 2011).
     prr_sigmoid_k: float = 2.0
 
     # ── Reproducibility ───────────────────────────────────────────────────────
@@ -382,37 +369,19 @@ class DSRCChannel:
 
     def _csma_success_prob(self, n_contenders: int) -> float:
         """
-        Probability of successful CSMA/CA transmission given N contenders.
+        MAC / contention success probability for N stations in carrier-sense range.
 
-        Uses a density-aware model calibrated to 802.11p performance at 2 Hz BSM rate.
-        
-        Real 802.11p at 2 Hz with ~200-byte beacons only saturates at hundreds of nodes.
-        This model provides realistic PRR degradation:
-          - N ≤ 20: PRR > 0.95 (minimal contention)
-          - N ≈ 50: PRR ≈ 0.85 (moderate contention)
-          - N ≈ 100: PRR ≈ 0.70 (heavy contention)
-          - N ≥ 200: PRR ≈ 0.50 (saturation)
-        
-        Based on empirical 802.11p measurements from:
-          - Campolo et al. (2011): "IEEE 802.11p performance in vehicular networks"
-          - ETSI TR 102 863: "V2V channel congestion analysis"
+        EXPERIMENTAL — UNCALIBRATED. The functional form ``max(0.35, exp(-0.005·(N-1)))`` and
+        both constants are project placeholders. They are not derived from a cited measurement or
+        an analytical broadcast model (Bianchi's model is for saturated unicast DCF, and the
+        references this function used to cite were not verified). Values produced:
+        N=1 → 1.00, 20 → 0.91, 50 → 0.78, 100 → 0.61, 200 → 0.37, ≥ 400 → 0.35 (floor).
+        Replace with a cited model before drawing conclusions about congestion.
         """
         if n_contenders <= 1:
             return 1.0
-        
-        # Density-aware contention model
-        # At 2 Hz, 200-byte BSMs: packet_time ≈ 0.53ms, interval = 500ms
-        # Theoretical max before saturation: ~900 vehicles (0.53ms/500ms)
-        # Practical saturation starts around 200 vehicles due to backoff overhead
-        
-        # Use exponential decay that matches empirical data
-        # PRR = exp(-λ * (N - 1)) where λ controls degradation rate
-        # λ = 0.005 gives: N=20→0.91, N=50→0.78, N=100→0.61, N=200→0.37
-        lambda_contention = 0.005
-        
-        # Add small constant floor for realistic minimum PRR
-        p_csma = math.exp(-lambda_contention * (n_contenders - 1))
-        return max(0.35, p_csma)  # Floor at 35% (realistic saturation level)
+        lambda_contention = 0.005  # placeholder
+        return max(0.35, math.exp(-lambda_contention * (n_contenders - 1)))
 
     # ── Geometry helpers ────────────────────────────────────────────────────────
 
@@ -425,12 +394,12 @@ class DSRCChannel:
         all_positions: Dict[int, Tuple[float, float]],
     ) -> bool:
         """
-        Determine LOS/NLOS by 2-D geometric occlusion.
+        Determine LOS/NLOS by 2-D geometric occlusion by VEHICLES only.
 
-        A third vehicle causes NLOS if its position lies within 2.5 m
-        (≈ vehicle width) of the TX→RX line segment. This is a computationally
-        lightweight approximation sufficient for urban block geometry as used by
-        Sommer et al.'s shadowing model.
+        A third registered station causes NLOS if its position lies within 2.5 m (about a
+        vehicle width) of the TX→RX segment. Buildings, vegetation and unregistered vehicles are
+        ignored, so in open or building-lined maps with few stations the link is almost always LOS.
+        This is a placeholder, not the Sommer et al. building-shadowing model.
         """
         for vid, pos in all_positions.items():
             if vid == sender_id or vid == receiver_id:

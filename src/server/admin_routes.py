@@ -247,7 +247,7 @@ async def list_rsus():
     """Return all RSUs registered in the V2X network."""
     if _world is None or getattr(_world, "v2x_network", None) is None:
         return []
-    rsus = getattr(_world.v2x_network, "_rsus", {})
+    rsus = _world.v2x_network.get_rsus()
     return [
         {
             "intersection_id": rsu.config.intersection_id,
@@ -268,7 +268,7 @@ async def list_vrus():
     """Return all active VRU VRUAM messages from the V2X network."""
     if _world is None or getattr(_world, "v2x_network", None) is None:
         return []
-    vru_messages = getattr(_world.v2x_network, "vru_messages", {})
+    vru_messages = _world.v2x_network.get_all_vruam()
     return [
         {
             "station_id": vruam.station_id,
@@ -292,7 +292,7 @@ async def list_spat():
     """Return current Signal Phase and Timing (SPAT) messages from all RSUs."""
     if _world is None or getattr(_world, "v2x_network", None) is None:
         return []
-    spat_messages = getattr(_world.v2x_network, "spat_messages", {})
+    spat_messages = _world.v2x_network.get_all_spat()
     return [
         {
             "intersection_id": spat.intersection_id,

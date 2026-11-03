@@ -459,7 +459,9 @@ def create_bsm_from_carla(vehicle, vehicle_id: int, msg_count: int,
 
 class DENMCauseCode(IntEnum):
     """
-    DENM cause codes — ETSI EN 302 637-3 Table 2.
+    DENM cause codes after ETSI EN 302 637-3. The numeric values used here match the cause-code
+    list as far as the author knows, but the table number and the full list are UNVERIFIED
+    (handoff S15) — check against the standard before relying on them.
     Describes the type of environmental notification event.
     """
     RESERVED = 0
