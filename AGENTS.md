@@ -107,6 +107,12 @@ Run in the venv or container, from the repo root: `python -m pytest tests -q -m 
   several "stored value" asserts in
   `test_v2x_messages.py`, mock vehicle/world classes duplicated across four files (needs a conftest).
 
+## 6a. Science use
+Runs are recorded with `POST /admin/runs` (see `docs/science/recording.md`: formats, how to load with pandas, what is/is not reproducible). Background traffic
+uses seeded driver profiles (`src/traffic/drivers.py`) on top of the Traffic Manager; the optional V2X advisory (`src/traffic/advisory.py`) is off by default.
+Set the seed per run with `/admin/connect {"seed": N}`. Live reproducibility: same seed → same drivers/spawns and trajectories within ~cm (not bit-identical).
+On CARLA 0.9.16 the TM method is `keep_slow_lane_rule_percentage` (not `keep_right_rule_percentage`); verify any new TM call against the live server (`dir(tm)`).
+
 ## 6b. Live CARLA
 The lab CARLA 0.9.16 PC is `192.168.0.104` and listens on RPC **2002** (streaming 2003); 2000 is taken by something else. Run live tests with
 `SERVER_URL=... ADMIN_TOKEN=... CARLA_HOST=192.168.0.104 CARLA_PORT=2002 pytest tests/server tests/integration -m carla`.

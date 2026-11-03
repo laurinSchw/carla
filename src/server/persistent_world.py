@@ -866,7 +866,6 @@ class PersistentCARLAServer:
         self._require_sim_thread()
         if self.recorder is not None:
             raise RunAlreadyRecording(f"a run is already being recorded: {self.recorder.run_id}")
-        import json as _json
         from pathlib import Path as _Path
         cfg = self.config
         recorder = RunRecorder(
@@ -905,7 +904,6 @@ class PersistentCARLAServer:
 
     def _run_manifest(self) -> dict:
         import platform
-        import sys
         cfg = self.config
         try:
             import numpy

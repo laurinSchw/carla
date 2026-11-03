@@ -18,9 +18,7 @@ if TYPE_CHECKING:
     import carla
 
 from .safety_messages import (
-    BSMCore, BSMPartII, V2VEnhancedMessage, DENM, DENMCauseCode,
-    create_bsm_from_carla, calculate_threat_level,
-    PRIORITY_ROUTINE, PRIORITY_HIGH, PRIORITY_EMERGENCY,
+    BSMCore, V2VEnhancedMessage, DENM, create_bsm_from_carla, calculate_threat_level,
     V2V_RANGE_MEDIUM, SHARE_SENSOR_DATA_DISTANCE
 )
 from .dsrc_channel import DSRCChannel, DSRCConfig, LinkResult

@@ -314,3 +314,29 @@ discover / threats / infrastructure of the last V2X update, plus the station cou
 - **Lighter traffic (the lab PC is modest):** the live test now defaults to `LIVE_TRAFFIC=25` vehicles + `LIVE_PEDESTRIANS=20`. With 3 LiDAR sessions:
   **17.5 FPS, tick p95 61.9 ms** (p50 16.1 ms; `world_tick` p95 59.2 ms, `lidar` p95 0.28 ms, `v2x_update` max 20.7 ms). Still above the 50 ms p95 target,
   and again almost entirely CARLA's `world.tick()`. For the 20 FPS target on this PC use fewer LiDAR sessions or lower `points_per_second`.
+
+## Science readiness: recording, driver profiles, reproducibility (2026-11-03)
+Details and file formats: `docs/science/recording.md`.
+
+- **Verified on the real CARLA 0.9.16 server (one test vehicle, destroyed after):** S2 yaw rate — CARLA's `angular_velocity.z` over the finite
+  difference of its own yaw = **1.008**, i.e. it is deg/s (the old code was wrong by ×57.3). S9 lateral acceleration: snapshot acceleration projected on
+  the right vector 4.98 m/s² vs v·ω 5.31 m/s² (6 %), right turns positive. S9 longitudinal 1.54 vs 2.06 m/s² by finite difference (looser: the
+  finite difference averages a changing ramp). Not a precise calibration, but the conventions and units are confirmed.
+- **Recorder** (`src/recording`, `/admin/runs`): manifest + events + ground-truth stations + per-link channel decisions (+ optional raw LiDAR).
+  Live check (25 vehicles, 30 s): 59 station rows exactly 10 frames apart, 64 900 link records. The first format (one JSON object per link) cost 430 B/link
+  (28 MB in 30 s); now columnar + gzip, ≈ 54 B/link, with a reproducible gzip header (no timestamp or path).
+- **Driver behaviour** (`src/traffic`): background vehicles got CARLA's Traffic Manager defaults, all identical, plus a global speed offset of −20 %
+  (20 % above the limit). Now each vehicle draws a seeded profile (cautious / normal / aggressive, default mix 20/60/20, speed offset jittered ±5 %) applied
+  through per-vehicle TM settings. Values are project defaults, not calibrated. Live (25 vehicles): mean ground-truth speed 13.2 / 15.7 / 19.2 km/h
+  (cautious / normal / aggressive), maximum 27 / 30 / 37 km/h. **The live TM has no `keep_right_rule_percentage`; the real name is
+  `keep_slow_lane_rule_percentage`** (found because the server recorded 25 `driver_setting_failed` events; fixed, 0 failures afterwards).
+  Other live TM methods that exist and are not used yet: `set_desired_speed`, `set_route`, `set_path`, `force_lane_change`, `ignore_vehicles_percentage`,
+  `ignore_walkers_percentage`, `vehicle_lane_offset`, `update_vehicle_lights`.
+- **V2X advisory** (optional, `advisory_enabled`): a vehicle that RECEIVED threatening BSMs (not ground truth) slows by +40 % for 3 s. Live with trigger level 2:
+  56 slow-downs and 32 restores in 40 s, each in `events.jsonl`. The effect on speeds/collisions is not measured yet.
+- **Seeds:** the pedestrian stream was unseeded; `world.set_pedestrians_seed` is now called. `seed` is settable via `/admin/connect` and `--seed` (it was not).
+- **Reproducibility measured live** (seed 42, 42, 43; 15 vehicles; trajectories interpolated to common times): same seed → identical driver sequence and
+  spawn points, position difference median 0.4 cm over 20 s (max 3 cm up to 5 s, 24 cm at 10 s, 3.3 m for one vehicle at 20 s); different seed → ≈ 90 m median.
+  Not bit-identical (real-time-paced commands, traffic-light phase, CARLA float behaviour).
+- **Static checks:** `ruff` (F, E9, B): no undefined names or syntax errors; unused imports removed. Coverage of `src` by the offline tests: 91 %.
+  Known stub: `V2XNetwork.enable_bidirectional_sharing` accepts sensor data and shares nothing (cooperative perception and CPM generation are not implemented).
