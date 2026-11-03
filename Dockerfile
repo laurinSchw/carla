@@ -44,7 +44,7 @@ COPY src/ ./src/
 COPY start_server.py .
 
 # Create logs directory
-RUN mkdir -p logs data
+RUN mkdir -p logs data runs
 
 # Expose the web server port
 EXPOSE 8000

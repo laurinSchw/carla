@@ -23,6 +23,8 @@ services:
       # Persist logs and data outside container
       - ./logs:/app/logs
       - ./data:/app/data
+      # recorded runs (manifest, events, stations, V2X links, optional LiDAR): keep them outside the container
+      - ./runs:/app/runs
     environment:
       - CARLA_HOST=192.168.1.101
       - CARLA_PORT=2000

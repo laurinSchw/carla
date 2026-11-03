@@ -271,6 +271,9 @@ class World:
     def get_blueprint_library(self):
         return self.bp_lib
 
+    def set_pedestrians_seed(self, seed):
+        self.rec.rec("world.set_pedestrians_seed", seed)
+
     def get_actors(self):
         self.rec.rec("world.get_actors")
         return _Actors()
@@ -314,7 +317,8 @@ class _TM:
 
     def __getattr__(self, name):
         def call(*a, **k):
-            self.rec.rec(f"tm.{name}")
+            actor = a[0] if a and hasattr(a[0], "id") else None
+            self.rec.rec(f"tm.{name}", (getattr(actor, "id", None), a[1:] if actor is not None else a))
         return call
 
 

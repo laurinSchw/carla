@@ -4,13 +4,16 @@ It uses the real SessionManager, so session behaviour (create/end/expire) is the
 production code; only spawning and telemetry are faked.
 """
 
+import tempfile
 from concurrent.futures import Future
+from pathlib import Path
 
 import numpy as np
 
 from src.lidar import protocol
 from src.lidar.config import LidarConfig, LidarLimits
 from src.lidar.manager import LidarError, LidarManager, Measurement, StreamProfile
+from src.recording.recorder import RunAlreadyRecording, RunRecorder, list_runs
 from src.server.session_manager import SessionManager
 
 _PT = np.dtype([("x", "f4"), ("y", "f4"), ("z", "f4"), ("cos_inc", "f4"), ("object_idx", "u4"), ("tag", "u4")])
@@ -48,6 +51,8 @@ class FakeWorld:
         self.pedestrians = 0
         self.v2x_network = None
         self.fixed_delta_seconds = 0.05
+        self.recorder = None
+        self._runs_dir = Path(tempfile.mkdtemp(prefix="fake-runs-"))
         self.lidar = LidarManager(FakeLidarBackend(), LidarLimits(max_sensors=2, max_total_points_per_second=1_000_000),
                                   0.05, seed=1)
         self._frame = 1000
@@ -130,6 +135,21 @@ class FakeWorld:
     def get_client_lidar_frame(self, session_id, profile=StreamProfile(), after_frame=-1):
         info = self.get_client_lidar_info(session_id)
         return None if info is None else self.lidar.get_stream_frame(info["sensor_id"], profile, after_frame)
+
+    # --- run recording ---------------------------------------------------
+    def start_run(self, name, record_lidar=False, record_links=True):
+        if self.recorder is not None:
+            raise RunAlreadyRecording(f"a run is already being recorded: {self.recorder.run_id}")
+        self.recorder = RunRecorder(self._runs_dir, name, {"config": {"seed": 42}}, start_frame=self._frame,
+                                    start_sim_time=0.0, git_sha="fake", record_links=record_links, record_lidar=record_lidar)
+        return self.recorder.summary()
+
+    def stop_run(self):
+        rec, self.recorder = self.recorder, None
+        return None if rec is None else rec.stop(self._frame, 1.0)
+
+    def get_run_status(self):
+        return {"current": self.recorder.summary() if self.recorder else None, "runs": list_runs(self._runs_dir)}
 
     # --- admin population ------------------------------------------------
     def spawn_background_traffic(self, count):

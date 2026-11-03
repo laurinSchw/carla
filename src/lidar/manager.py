@@ -188,6 +188,7 @@ class LidarManager:
         self._frame = 0
         self.events: List[dict] = []
         self._raw_listeners: List[Callable[[dict, LidarFrame], None]] = []
+        self._event_listeners: List[Callable[[dict], None]] = []
 
         # published for other threads: replaced, never mutated
         self._published: Tuple[dict, ...] = ()
@@ -377,6 +378,10 @@ class LidarManager:
             "max_sensors": self.limits.max_sensors,
         }
 
+    def add_event_listener(self, callback: Callable[[dict], None]) -> None:
+        """Called on the simulation thread with every lifecycle event (``frame``, ``sensor_id``, ``state``, ``reason``)."""
+        self._event_listeners.append(callback)
+
     def add_raw_listener(self, callback: Callable[[dict, LidarFrame], None]) -> None:
         """Called on the simulation thread with every full-resolution frame (recording hooks)."""
         self._raw_listeners.append(callback)
@@ -479,8 +484,14 @@ class LidarManager:
         self._event(s, reason)
 
     def _event(self, s: Sensor, reason: str) -> None:
-        self.events.append({"frame": self._frame, "sensor_id": s.sensor_id, "actor_id": s.actor_id,
-                            "state": s.state.value, "reason": reason})
+        ev = {"frame": self._frame, "sensor_id": s.sensor_id, "actor_id": s.actor_id,
+              "state": s.state.value, "reason": reason}
+        self.events.append(ev)
+        for cb in self._event_listeners:
+            try:
+                cb(ev)
+            except Exception:
+                logger.exception("LiDAR event listener failed")
         if len(self.events) > 2000:
             del self.events[:1000]
 

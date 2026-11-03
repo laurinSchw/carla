@@ -61,7 +61,7 @@ def test_openapi_schema_is_served(client):
 
 # --- admin auth ---------------------------------------------------------
 
-ADMIN_GETS = ["/admin/status", "/admin/sessions", "/admin/v2x/rsus", "/admin/v2x/vrus", "/admin/v2x/spat", "/admin/v2x/links"]
+ADMIN_GETS = ["/admin/status", "/admin/sessions", "/admin/v2x/rsus", "/admin/v2x/vrus", "/admin/v2x/spat", "/admin/v2x/links", "/admin/runs"]
 
 
 @pytest.mark.parametrize("path", ADMIN_GETS)
@@ -384,3 +384,26 @@ def test_lidar_viewer_scripts_are_served_as_javascript(client):
     assert "LidarDecoder" in client.get("/static/js/lidar-decoder.js").text
     page = client.get("/client").text
     assert "/static/js/lidar-decoder.js" in page and 'id="lidarCanvas"' in page
+
+
+# --- run recording --------------------------------------------------------
+
+def test_run_recording_lifecycle_over_http(client, world):
+    assert client.get("/admin/runs", headers=AUTH).json() == {"current": None, "runs": []}
+    r = client.post("/admin/runs", json={"name": "science run", "record_links": True}, headers=AUTH)
+    assert r.status_code == 201 and r.json()["run_id"].endswith("_science-run") and r.json()["closed"] is False
+    assert client.post("/admin/runs", json={"name": "second"}, headers=AUTH).status_code == 409
+    assert client.get("/admin/runs", headers=AUTH).json()["current"]["run_id"] == r.json()["run_id"]
+    stopped = client.post("/admin/runs/current/stop", headers=AUTH)
+    assert stopped.status_code == 200 and stopped.json()["complete"] is True
+    assert client.post("/admin/runs/current/stop", headers=AUTH).status_code == 404
+    listing = client.get("/admin/runs", headers=AUTH).json()
+    assert listing["current"] is None and [x["name"] for x in listing["runs"]] == ["science run"]
+
+
+def test_run_endpoints_require_the_admin_token_and_a_running_world(client, world):
+    assert client.post("/admin/runs", json={"name": "x"}).status_code == 422
+    assert client.post("/admin/runs", json={"name": "x"}, headers={"X-Admin-Token": "nope"}).status_code == 403
+    assert client.post("/admin/runs", json={"name": ""}, headers=AUTH).status_code == 422       # name must not be empty
+    world._running = False
+    assert client.post("/admin/runs", json={"name": "x"}, headers=AUTH).status_code == 503

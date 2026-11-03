@@ -44,6 +44,9 @@ import carla
 from src.lidar.carla_backend import CarlaLidarBackend
 from src.lidar.config import LidarConfig
 from src.lidar.manager import LidarError, LidarManager, StreamProfile
+from src.traffic.advisory import V2XAdvisory
+from src.traffic.drivers import DriverAssigner, DriverProfile, apply_profile
+from src.recording.recorder import RunAlreadyRecording, RunRecorder, list_runs
 from src.server.session_manager import SessionManager
 from src.server.sim_executor import SimThreadExecutor
 from src.server.world_config import WorldConfig
@@ -58,6 +61,19 @@ _FALLBACK_BLUEPRINTS = [
 ]
 
 _SESSION_CHECK_EVERY_N_FRAMES = 100  # ~5 s at 20 FPS
+
+
+def _git_sha() -> str:
+    """Short git sha for run manifests: env GIT_SHA (set in Docker builds) or ``git rev-parse``, else ``nogit``."""
+    import os
+    import subprocess
+    if os.environ.get("GIT_SHA"):
+        return os.environ["GIT_SHA"]
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=3)
+        return out.stdout.strip() or "nogit"
+    except Exception:
+        return "nogit"
 
 
 class PersistentCARLAServer:
@@ -80,6 +96,16 @@ class PersistentCARLAServer:
         self._rng = random.Random(config.seed)
         # separate stream so the penetration draw never shifts spawn-point/blueprint choices
         self._v2x_rng = random.Random(config.seed + 1)
+
+        # background-traffic drivers: seeded profile draw (+2), optional V2X advisory, per-vehicle bookkeeping
+        self._drivers = DriverAssigner(config.driver_mix, config.seed + 2)
+        self._driver_of: Dict[int, DriverProfile] = {}
+        self._advisory = V2XAdvisory(config.advisory)
+        self._advised: Dict[int, float] = {}  # actor id -> base speed offset while an advisory is active
+
+        # run recording (one at a time); created by start_run()
+        self.recorder: Optional[RunRecorder] = None
+        self._sim_time = 0.0  # simulation time of the last tick (stamps recorded events)
 
         # CARLA handles
         self.client: Optional[carla.Client] = None
@@ -179,6 +205,10 @@ class PersistentCARLAServer:
         self.tm.set_random_device_seed(cfg.seed)
         self.tm.set_global_distance_to_leading_vehicle(cfg.safety_distance_m)
         self.tm.global_percentage_speed_difference(cfg.global_speed_pct)
+        try:  # walkers pick random navigation targets: seed that stream too (reproducibility)
+            self.world.set_pedestrians_seed(cfg.seed)
+        except Exception as exc:
+            logger.warning("could not seed pedestrians: %s", exc)
 
         self.bp_lib = self.world.get_blueprint_library()
         self.spawn_points = self.world.get_map().get_spawn_points()
@@ -188,6 +218,8 @@ class PersistentCARLAServer:
         self.lidar = LidarManager(
             CarlaLidarBackend(self.world), cfg.lidar, cfg.fixed_delta_seconds, seed=cfg.seed,
         )
+        self.lidar.add_event_listener(lambda ev: self._record_event("lidar", **ev))
+        self.lidar.add_raw_listener(lambda info, lf: self.recorder.lidar_frame(info, lf) if self.recorder else None)
 
         # V2X network (V2V + V2I RSU + V2P VRU)
         if self.v2x_enabled:
@@ -289,6 +321,7 @@ class PersistentCARLAServer:
                 self._tick()
                 snapshot = self.world.get_snapshot()
                 t_b = time.monotonic()
+                self._sim_time = float(snapshot.timestamp.elapsed_seconds)
                 self._publish_telemetry(snapshot)
                 self._lidar_tick(snapshot)
                 t_c = time.monotonic()
@@ -327,11 +360,13 @@ class PersistentCARLAServer:
                     t0 = time.monotonic()
                     self.v2x_network.update(snapshot)
                     t1 = time.monotonic()
+                    self._advisory_step(self._sim_time)
                     self._publish_v2x()
                     self._timing["v2x_update"].append((t1 - t0) * 1000.0)
                     self._timing["v2x_publish"].append((time.monotonic() - t1) * 1000.0)
                 except Exception:
                     logger.exception("V2X update failed at frame %d (simulation continues)", self._frame)
+            self._record_v2x(snapshot)  # after the update, so stations and links belong to the same frame
 
         if self._frame - self._last_session_check_frame >= _SESSION_CHECK_EVERY_N_FRAMES:
             self._last_session_check_frame = self._frame
@@ -433,11 +468,49 @@ class PersistentCARLAServer:
             actor = self.world.get_actor(r.actor_id)
             if actor:
                 self._background_vehicles.append(actor)
+                profile = self._assign_driver(actor)
                 self._maybe_register_background_v2x(actor)
+                self._record_event("spawn_background_vehicle", actor_id=actor.id, type_id=actor.type_id,
+                                   driver=profile.name if profile else None,
+                                   driver_settings=profile.tm_settings() if profile else None,
+                                   v2x_equipped=self.v2x_network is not None and actor.id in self.v2x_network.vehicles)
                 spawned += 1
 
         logger.info("Spawned %d / %d background vehicles", spawned, count)
         return spawned
+
+    def _assign_driver(self, actor) -> Optional[DriverProfile]:
+        """Draw a seeded driver profile for a background vehicle and apply it through the Traffic Manager."""
+        if not self.config.drivers_enabled:
+            return None
+        profile = self._drivers.next_profile()
+        self._driver_of[actor.id] = profile
+        failed = apply_profile(self.tm, actor, profile)
+        if failed:
+            self._record_event("driver_setting_failed", actor_id=actor.id, settings=failed)
+        return profile
+
+    def _advisory_step(self, sim_time: float) -> None:
+        """V2X-assisted driving (optional): a vehicle that RECEIVED threatening BSMs slows down for a while."""
+        net = self.v2x_network
+        if net is None or not self.config.advisory.enabled:
+            return
+        levels = {}
+        for vid in self._driver_of:
+            if vid in net.vehicles:
+                threats = net.get_threats(vid)
+                levels[vid] = max((t["level"] for t in threats), default=0)
+        for vid, action in self._advisory.update(sim_time, levels):
+            profile = self._driver_of.get(vid)
+            actor = next((a for a in self._background_vehicles if a.id == vid), None)
+            if profile is None or actor is None:
+                continue
+            slow = profile.speed_pct + self.config.advisory.extra_slowdown_pct if action == "slow" else profile.speed_pct
+            try:
+                self.tm.vehicle_percentage_speed_difference(actor, slow)
+            except Exception as exc:
+                logger.warning("advisory could not set speed for %s: %s", vid, exc)
+            self._record_event("advisory", actor_id=vid, action=action, speed_pct=slow, threat_level=levels.get(vid))
 
     def _maybe_register_background_v2x(self, actor) -> None:
         """Make a background vehicle a V2X station with probability ``v2x_penetration_rate``."""
@@ -457,6 +530,10 @@ class PersistentCARLAServer:
         if self.v2x_network is not None:
             for v in self._background_vehicles:
                 self.v2x_network.unregister(v.id)
+        for v in self._background_vehicles:
+            self._driver_of.pop(v.id, None)
+            self._advisory.forget(v.id)
+        self._record_event("despawn_background_traffic", count=count)
         batch = [carla.command.DestroyActor(v) for v in self._background_vehicles]
         self.client.apply_batch_sync(batch, False)
         self._background_vehicles.clear()
@@ -526,6 +603,7 @@ class PersistentCARLAServer:
             from src.v2x.messages import VRUProfile
             for ped in ped_actors:
                 self.v2x_network.register_vru(ped.id, ped, VRUProfile.PEDESTRIAN)
+        self._record_event("spawn_pedestrians", requested=count, spawned=spawned)
         logger.info("Spawned %d / %d pedestrians", spawned, count)
         return spawned
 
@@ -596,6 +674,7 @@ class PersistentCARLAServer:
         actor.set_autopilot(True, self.tm.get_port())
         self._client_vehicles[session_id] = actor
         session.vehicle_actor_id = actor.id
+        self._record_event("client_join", session_id=session_id, actor_id=actor.id, blueprint=blueprint_id)
 
         # Publish a first telemetry sample now so the joining client can read it at once
         # (the next per-frame publish replaces it).
@@ -622,6 +701,7 @@ class PersistentCARLAServer:
         self._despawn_client_vehicle(session_id)
 
     def _despawn_client_vehicle(self, session_id: str) -> None:
+        self._record_event("client_leave", session_id=session_id)
         if self.lidar is not None:
             self.lidar.destroy_owner_now(session_id)  # stop the sensor before its parent vehicle goes
         actor = self._client_vehicles.pop(session_id, None)
@@ -778,6 +858,134 @@ class PersistentCARLAServer:
         }
 
     # ------------------------------------------------------------------ #
+    # Run recording (handoff §5.6): simulation thread for start/stop       #
+    # ------------------------------------------------------------------ #
+
+    def start_run(self, name: str, record_lidar: bool = False, record_links: bool = True) -> dict:
+        """Start writing a run directory (events, ground-truth stations, V2X link results, optional raw LiDAR)."""
+        self._require_sim_thread()
+        if self.recorder is not None:
+            raise RunAlreadyRecording(f"a run is already being recorded: {self.recorder.run_id}")
+        import json as _json
+        from pathlib import Path as _Path
+        cfg = self.config
+        recorder = RunRecorder(
+            _Path(cfg.runs_dir), name, self._run_manifest(),
+            start_frame=self._frame, start_sim_time=self._sim_time,
+            git_sha=_git_sha(), record_links=record_links, record_lidar=record_lidar,
+        )
+        self.recorder = recorder
+        self._record_event("run_start", name=name)
+        for a in self._background_vehicles:  # actors that already exist when the run starts
+            p = self._driver_of.get(a.id)
+            self._record_event("existing_background_vehicle", actor_id=a.id, driver=p.name if p else None,
+                               driver_settings=p.tm_settings() if p else None)
+        for sid, a in self._client_vehicles.items():
+            self._record_event("existing_client_vehicle", session_id=sid, actor_id=a.id)
+        logger.info("Recording run %s", recorder.run_id)
+        return recorder.summary()
+
+    def stop_run(self) -> Optional[dict]:
+        self._require_sim_thread()
+        return self._finish_run()
+
+    def _finish_run(self) -> Optional[dict]:
+        recorder, self.recorder = self.recorder, None
+        if recorder is None:
+            return None
+        self._record_event_to(recorder, "run_stop")
+        manifest = recorder.stop(self._frame, self._sim_time)
+        logger.info("Run %s stopped: %s", recorder.run_id, manifest["row_counts"])
+        return manifest
+
+    def get_run_status(self) -> dict:
+        from pathlib import Path as _Path
+        rec = self.recorder
+        return {"current": rec.summary() if rec else None, "runs": list_runs(_Path(self.config.runs_dir))}
+
+    def _run_manifest(self) -> dict:
+        import platform
+        import sys
+        cfg = self.config
+        try:
+            import numpy
+            numpy_version = numpy.__version__
+        except Exception:
+            numpy_version = None
+        try:
+            server_version = self.client.get_server_version()
+            client_version = self.client.get_client_version()
+        except Exception:
+            server_version = client_version = None
+        from src.traffic.drivers import PROFILES
+        from dataclasses import asdict as _asdict
+        return {
+            "config": cfg.model_dump(mode="json"),
+            "map": self._map_name,
+            "fixed_delta_seconds": cfg.fixed_delta_seconds,
+            "seeds": {"master": cfg.seed, "v2x_penetration": cfg.seed + 1, "drivers": cfg.seed + 2,
+                      "dsrc": self.v2x_network._dsrc_channel.config.random_seed if self.v2x_network else None,
+                      "traffic_manager": cfg.seed, "pedestrians": cfg.seed},
+            "driver_profiles": {k: _asdict(v) for k, v in PROFILES.items()},
+            "dsrc_config": _asdict(self.v2x_network._dsrc_channel.config) if self.v2x_network else None,
+            "awareness_range_m": self.v2x_range if self.v2x_network else None,
+            "v2x_update_every_n_frames": cfg.v2x_every_n_frames,
+            "versions": {"python": platform.python_version(), "numpy": numpy_version,
+                         "carla_client": client_version, "carla_server": server_version, "platform": platform.platform()},
+            "reproducibility": {
+                "synchronous_mode": True, "realtime_pacing": True,
+                "note": "the tick loop sleeps to real time, so the timing of admin/client commands relative to frames is not "
+                        "reproducible; same seed + same command frames give the same V2X data only if CARLA and the "
+                        "Traffic Manager are deterministic on this machine (not verified live).",
+            },
+        }
+
+    def _record_event(self, kind: str, **data) -> None:
+        rec = self.recorder
+        if rec is not None:
+            self._record_event_to(rec, kind, **data)
+
+    def _record_event_to(self, rec: RunRecorder, kind: str, **data) -> None:
+        try:
+            rec.event(self._frame, self._sim_time, kind, **data)
+        except Exception:
+            logger.exception("recording event %s failed", kind)
+
+    def _record_v2x(self, snapshot) -> None:
+        """Ground truth of every station plus this update's link results (full precision, never decimated)."""
+        rec = self.recorder
+        if rec is None:
+            return
+        try:
+            net = self.v2x_network
+            equipped = set(net.vehicles) if net is not None else set()
+            stations = []
+            kinds = [(a, "client") for a in self._client_vehicles.values()] + [(a, "background") for a in self._background_vehicles]
+            for actor, kind in kinds:
+                snap = snapshot.find(actor.id)
+                if snap is None:
+                    continue
+                t, v = snap.get_transform(), snap.get_velocity()
+                p = self._driver_of.get(actor.id)
+                stations.append({
+                    "id": actor.id, "kind": kind, "v2x_equipped": actor.id in equipped, "driver": p.name if p else None,
+                    "x_m": t.location.x, "y_m": t.location.y, "z_m": t.location.z, "yaw_deg": t.rotation.yaw,
+                    "vx_mps": v.x, "vy_mps": v.y, "speed_mps": math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z),
+                })
+            if net is not None:
+                for iid, rsu in net.get_rsus().items():
+                    stations.append({"id": iid, "kind": "rsu", "x_m": rsu.config.position[0],
+                                     "y_m": rsu.config.position[1], "z_m": rsu.config.position[2]})
+                for vid, m in net.get_all_vruam().items():
+                    stations.append({"id": vid, "kind": "vru", "x_m": m.position[0], "y_m": m.position[1],
+                                     "z_m": m.position[2], "speed_mps": m.speed, "heading_deg": m.heading})
+            rec.stations(self._frame, self._sim_time, stations)
+            if net is not None:
+                rec.links(self._frame, self._sim_time, net.get_link_results())
+        except Exception:
+            logger.exception("recording V2X frame %d failed (simulation continues)", self._frame)
+
+    # ------------------------------------------------------------------ #
     # LiDAR (sim thread for changes; published snapshots for reads)         #
     # ------------------------------------------------------------------ #
 
@@ -865,6 +1073,11 @@ class PersistentCARLAServer:
 
     def _cleanup_all(self) -> None:
         """Destroy everything this server spawned (simulation thread, or start() failure)."""
+        if self.recorder is not None:  # finish the run file cleanly on every way out
+            try:
+                self._finish_run()
+            except Exception as exc:
+                logger.warning("closing the run recording: %s", exc)
         # Stop LiDAR sensor callbacks before batch-destroying vehicles
         if self.lidar is not None:
             try:

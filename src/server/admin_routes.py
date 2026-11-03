@@ -21,6 +21,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Header, Depends, Query
 from pydantic import BaseModel, Field, ValidationError
 
+from src.recording.recorder import RunAlreadyRecording
 from src.server.route_utils import on_sim_thread
 from src.server.world_config import WorldConfig
 
@@ -312,6 +313,43 @@ async def list_spat():
         }
         for spat in spat_messages.values()
     ]
+
+
+class RunRequest(BaseModel):
+    name: str = Field(default="run", min_length=1, max_length=64)
+    record_lidar: bool = Field(default=False, description="Also write every LiDAR frame at full resolution (large).")
+    record_links: bool = Field(default=True, description="Write one record per V2X transmission attempt.")
+
+
+@router.post("/runs", status_code=201, summary="Start recording a run", dependencies=[Depends(_require_admin)])
+async def start_run(req: RunRequest):
+    """Write frame-stamped, full-resolution data to ``runs/<UTC>_<sha>_<name>/`` until stopped.
+
+    Files: ``manifest.json`` (settings, seeds, versions), ``events.jsonl``, ``stations.jsonl`` (ground truth every V2X update),
+    ``v2x_links.jsonl`` (channel decision per attempt), optional raw LiDAR.
+    """
+    _assert_ready()
+    _assert_running()
+    try:
+        return await on_sim_thread(_world, _world.start_run, req.name, req.record_lidar, req.record_links)
+    except RunAlreadyRecording as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/runs/current/stop", summary="Stop the current recording", dependencies=[Depends(_require_admin)])
+async def stop_run():
+    _assert_ready()
+    manifest = await on_sim_thread(_world, _world.stop_run)
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="no run is being recorded")
+    return manifest
+
+
+@router.get("/runs", summary="Current recording and finished runs", dependencies=[Depends(_require_admin)])
+async def list_runs_endpoint():
+    if _world is None:
+        return {"current": None, "runs": []}
+    return _world.get_run_status()
 
 
 @router.get("/v2x/links", summary="Per-link channel results of the last V2X update",

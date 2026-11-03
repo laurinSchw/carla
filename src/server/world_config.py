@@ -8,6 +8,8 @@ this class existed (Phase 2 is a refactor, not a model change).
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.lidar.config import LidarLimits
+from src.traffic.advisory import AdvisoryConfig
+from src.traffic.drivers import DriverMix
 
 
 class WorldConfig(BaseModel):
@@ -37,6 +39,14 @@ class WorldConfig(BaseModel):
     # Share of background (non-client) vehicles that are V2X stations (handoff S3 / D2).
     # 1.0 = all equipped; client vehicles are always stations.
     v2x_penetration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    # Background-traffic driver behaviour (seeded profiles on top of the Traffic Manager) and the optional V2X advisory
+    drivers_enabled: bool = True
+    driver_mix: DriverMix = Field(default_factory=DriverMix)
+    advisory: AdvisoryConfig = Field(default_factory=AdvisoryConfig)
+
+    # run recordings are written under this directory (relative to the working directory)
+    runs_dir: str = "runs"
 
     # LiDAR resource policy (sensor count, points/s budget, auto-release, frame wait)
     lidar: LidarLimits = Field(default_factory=LidarLimits)
