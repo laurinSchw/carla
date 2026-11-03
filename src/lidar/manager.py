@@ -214,6 +214,7 @@ class LidarManager:
         # published for other threads: replaced, never mutated
         self._published: Tuple[dict, ...] = ()
         self._published_budget: dict = {}
+        self.info_version = 0  # increases with every change of the published sensor list (the hub pushes on change)
         self._latest: Dict[int, LidarFrame] = {}
         # newest frame divisible by n, per sensor and n: a viewer asking for "every n-th frame" gets the newest due frame
         # however its polling phase drifts against the simulation ticks (a pure `frame % n` test on the latest frame
@@ -560,3 +561,4 @@ class LidarManager:
     def _publish(self) -> None:
         self._published = tuple(s.info(self.dt) for s in list(self._sensors.values()))
         self._published_budget = self._budget_now()
+        self.info_version += 1
