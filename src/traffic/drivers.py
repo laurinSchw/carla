@@ -19,6 +19,7 @@ TM semantics used (CARLA 0.9.x Traffic Manager API, to be confirmed against 0.9.
 from __future__ import annotations
 
 import logging
+import math
 import random
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Mapping
@@ -70,6 +71,17 @@ class DriverMix:
     cautious: float = 0.2
     normal: float = 0.6
     aggressive: float = 0.2
+
+    def __post_init__(self) -> None:
+        # validated here, not on first use: a NaN or a string used to pass the API and crash the spawn halfway through
+        for name in ("cautious", "normal", "aggressive"):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise TypeError(f"driver mix weight {name!r} must be a number, got {v!r}")
+            if not math.isfinite(v) or v < 0:
+                raise ValueError(f"driver mix weight {name!r} must be finite and >= 0, got {v!r}")
+        if self.cautious + self.normal + self.aggressive <= 0:
+            raise ValueError("driver mix weights must not all be zero")
 
     def weights(self) -> List[float]:
         w = [self.cautious, self.normal, self.aggressive]

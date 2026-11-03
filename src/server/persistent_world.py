@@ -64,17 +64,27 @@ _FALLBACK_BLUEPRINTS = [
 _SESSION_CHECK_EVERY_N_FRAMES = 100  # ~5 s at 20 FPS
 
 
+_GIT_SHA: Optional[str] = None
+
+
 def _git_sha() -> str:
-    """Short git sha for run manifests: env GIT_SHA (set in Docker builds) or ``git rev-parse``, else ``nogit``."""
-    import os
-    import subprocess
-    if os.environ.get("GIT_SHA"):
-        return os.environ["GIT_SHA"]
-    try:
-        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=3)
-        return out.stdout.strip() or "nogit"
-    except Exception:
-        return "nogit"
+    """Short git sha for run manifests: env GIT_SHA (set in Docker builds) or ``git rev-parse``, else ``nogit``.
+
+    Looked up once: it runs a subprocess (up to 3 s) and ``start_run`` executes on the simulation thread.
+    """
+    global _GIT_SHA
+    if _GIT_SHA is None:
+        import os
+        import subprocess
+        if os.environ.get("GIT_SHA"):
+            _GIT_SHA = os.environ["GIT_SHA"]
+        else:
+            try:
+                out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=3)
+                _GIT_SHA = out.stdout.strip() or "nogit"
+            except Exception:
+                _GIT_SHA = "nogit"
+    return _GIT_SHA
 
 
 class PersistentCARLAServer:
@@ -106,6 +116,7 @@ class PersistentCARLAServer:
 
         # run recording (one at a time); created by start_run()
         self.recorder: Optional[RunRecorder] = None
+        self._stopped = False
         self._sim_time = 0.0  # simulation time of the last tick (stamps recorded events)
 
         # CARLA handles
@@ -219,7 +230,10 @@ class PersistentCARLAServer:
         self.lidar = LidarManager(
             CarlaLidarBackend(self.world), cfg.lidar, cfg.fixed_delta_seconds, seed=cfg.seed,
         )
-        self.lidar.add_event_listener(lambda ev: self._record_event("lidar", **ev))
+        # the manager's event already has a "frame" key, which would clash with the recorder's own stamp (and used to make
+        # every LiDAR event silently disappear): rename it
+        self.lidar.add_event_listener(
+            lambda ev: self._record_event("lidar", **{("lidar_frame" if k == "frame" else k): v for k, v in ev.items()}))
         self.lidar.add_raw_listener(lambda info, lf: self.recorder.lidar_frame(info, lf) if self.recorder else None)
 
         # V2X network (V2V + V2I RSU + V2P VRU)
@@ -239,6 +253,9 @@ class PersistentCARLAServer:
 
     def stop(self) -> None:
         """Stop the simulation thread; it destroys all managed actors on its way out."""
+        if self._stopped:
+            return
+        self._stopped = True
         logger.info("Stopping persistent CARLA server…")
         self._running = False
         thread = self._tick_thread
@@ -356,6 +373,7 @@ class PersistentCARLAServer:
         """V2X update and session expiry. An error here must not stop the simulation."""
         if self._frame - self._last_v2x_frame >= every_n:
             self._last_v2x_frame = self._frame
+            updated = False
             if self.v2x_network is not None:
                 try:
                     t0 = time.monotonic()
@@ -365,9 +383,10 @@ class PersistentCARLAServer:
                     self._publish_v2x()
                     self._timing["v2x_update"].append((t1 - t0) * 1000.0)
                     self._timing["v2x_publish"].append((time.monotonic() - t1) * 1000.0)
+                    updated = True
                 except Exception:
                     logger.exception("V2X update failed at frame %d (simulation continues)", self._frame)
-            self._record_v2x(snapshot)  # after the update, so stations and links belong to the same frame
+            self._record_v2x(snapshot, links_valid=updated)  # after the update, so stations and links belong to the same frame
 
         if self._frame - self._last_session_check_frame >= _SESSION_CHECK_EVERY_N_FRAMES:
             self._last_session_check_frame = self._frame
@@ -461,21 +480,26 @@ class PersistentCARLAServer:
             )
 
         results = self.client.apply_batch_sync(batch, False)
-        spawned = 0
+        new_actors = []
         for r in results:
             if r.error:
                 logger.debug("Spawn error: %s", r.error)
                 continue
             actor = self.world.get_actor(r.actor_id)
             if actor:
-                self._background_vehicles.append(actor)
+                self._background_vehicles.append(actor)  # tracked first: whatever fails below, it is destroyed on despawn/stop
+                new_actors.append(actor)
+        for actor in new_actors:
+            try:
                 profile = self._assign_driver(actor)
                 self._maybe_register_background_v2x(actor)
                 self._record_event("spawn_background_vehicle", actor_id=actor.id, type_id=actor.type_id,
                                    driver=profile.name if profile else None,
                                    driver_settings=profile.tm_settings() if profile else None,
                                    v2x_equipped=self.v2x_network is not None and actor.id in self.v2x_network.vehicles)
-                spawned += 1
+            except Exception:
+                logger.exception("setting up background vehicle %s failed (it stays tracked)", getattr(actor, "id", "?"))
+        spawned = len(new_actors)
 
         logger.info("Spawned %d / %d background vehicles", spawned, count)
         return spawned
@@ -497,7 +521,8 @@ class PersistentCARLAServer:
         if net is None or not self.config.advisory.enabled:
             return
         levels, hazards = {}, {}
-        for vid in self._driver_of:
+        for actor in self._background_vehicles:
+            vid = actor.id
             if vid not in net.vehicles:
                 continue
             levels[vid] = max((t["level"] for t in net.get_threats(vid)), default=0)
@@ -514,10 +539,11 @@ class PersistentCARLAServer:
         for vid, action in self._advisory.update(sim_time, levels, hazards):
             profile = self._driver_of.get(vid)
             actor = next((a for a in self._background_vehicles if a.id == vid), None)
-            if profile is None or actor is None:
+            if actor is None:
                 continue
+            base = profile.speed_pct if profile is not None else self.config.global_speed_pct   # drivers off: the global offset
             extra = self._advisory.slowdown_pct(vid) if action == "slow" else 0.0
-            speed_pct = profile.speed_pct + extra
+            speed_pct = base + extra
             try:
                 self.tm.vehicle_percentage_speed_difference(actor, speed_pct)
             except Exception as exc:
@@ -747,7 +773,8 @@ class PersistentCARLAServer:
         self._despawn_client_vehicle(session_id)
 
     def _despawn_client_vehicle(self, session_id: str) -> None:
-        self._record_event("client_leave", session_id=session_id)
+        if session_id in self._client_vehicles:  # a kick followed by the WebSocket cleanup must not log the leave twice
+            self._record_event("client_leave", session_id=session_id)
         if self.lidar is not None:
             self.lidar.destroy_owner_now(session_id)  # stop the sensor before its parent vehicle goes
         actor = self._client_vehicles.pop(session_id, None)
@@ -999,7 +1026,7 @@ class PersistentCARLAServer:
         except Exception:
             logger.exception("recording event %s failed", kind)
 
-    def _record_v2x(self, snapshot) -> None:
+    def _record_v2x(self, snapshot, links_valid: bool = True) -> None:
         """Ground truth of every station plus this update's link results (full precision, never decimated)."""
         rec = self.recorder
         if rec is None:
@@ -1028,7 +1055,7 @@ class PersistentCARLAServer:
                     stations.append({"id": vid, "kind": "vru", "x_m": m.position[0], "y_m": m.position[1],
                                      "z_m": m.position[2], "speed_mps": m.speed, "heading_deg": m.heading})
             rec.stations(self._frame, self._sim_time, stations)
-            if net is not None:
+            if net is not None and links_valid:  # never stamp the previous update's links with this frame
                 rec.links(self._frame, self._sim_time, net.get_link_results())
         except Exception:
             logger.exception("recording V2X frame %d failed (simulation continues)", self._frame)

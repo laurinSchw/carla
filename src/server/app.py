@@ -3,11 +3,16 @@
 Replaces the plane-B wiring that lived in ``src/visualization/lidar/server.py``.
 """
 
+import asyncio
+import logging
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import src.server.admin_routes as _admin_mod
@@ -15,7 +20,30 @@ import src.server.client_routes as _client_mod
 
 WEB_DIR = Path(__file__).parent.parent / "visualization" / "web"
 
-app = FastAPI(title="CARLA V2X + LiDAR Server")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Stop the world on shutdown (SIGTERM, ``docker restart``, Ctrl+C).
+
+    Worlds created through ``/admin/connect`` (the only way in Docker) were never stopped: the open run had no gzip
+    trailer or final manifest, actors stayed in CARLA, and CARLA was left in synchronous mode with nobody ticking it.
+    """
+    yield
+    world = _admin_mod._world
+    if world is not None:
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, world.stop)
+        except Exception:
+            logging.getLogger(__name__).exception("stopping the world on shutdown failed")
+
+
+app = FastAPI(title="CARLA V2X + LiDAR Server", lifespan=_lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(_request: Request, exc: RequestValidationError):
+    """422 without echoing the offending input: a NaN/Infinity in the body cannot be serialised back as JSON (it became a 500)."""
+    errors = [{k: v for k, v in e.items() if k not in ("input", "ctx", "url")} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
 app.include_router(_admin_mod.router)
 app.include_router(_client_mod.router)
 

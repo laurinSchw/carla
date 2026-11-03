@@ -162,3 +162,105 @@ def test_columnar_gzip_is_much_smaller_than_one_json_object_per_link(tmp_path):
     r.stop(11, 0.55)
     naive = sum(len(dumps(l)) + 1 for l in rows)
     assert links_file(r).stat().st_size < naive / 5
+
+
+# ── fixes from the independent review ────────────────────────────────────────
+
+def test_two_runs_with_the_same_name_in_the_same_second_get_distinct_directories(tmp_path):
+    """Review finding: stop + immediate restart (or names that slug alike) raised FileExistsError -> an unmapped HTTP 500."""
+    a, b, c = make(tmp_path), make(tmp_path), make(tmp_path)
+    assert len({a.run_id, b.run_id, c.run_id}) == 3 and b.run_id.endswith("-2") and c.run_id.endswith("-3")
+    for r in (a, b, c):
+        r.stop(1, 0.1)
+    assert len(list_runs(tmp_path)) == 3
+    assert RunRecorder(tmp_path, "a b", {}, start_frame=0, start_sim_time=0.0, git_sha="x", utcnow=lambda: NOW).run_id != \
+        RunRecorder(tmp_path, "a/b", {}, start_frame=0, start_sim_time=0.0, git_sha="x", utcnow=lambda: NOW).run_id
+
+
+def test_a_write_error_is_reported_in_the_manifest_and_stops_further_writing(tmp_path):
+    """Review finding: after a transient ENOSPC the gzip stream was damaged but the manifest still said complete=true."""
+    r = make(tmp_path)
+    r.event(1, 0.05, "ok")
+    real = r._files["events.jsonl"]
+
+    class Failing:
+        def write(self, *_a):
+            raise OSError(28, "No space left on device")
+
+        def flush(self):
+            pass
+
+        def close(self):
+            real.close()
+
+    r._files["events.jsonl"] = Failing()
+    r.event(2, 0.1, "lost")
+    assert r.write_error and "No space" in r.write_error
+    r.stations(3, 0.15, [])                                  # no further writes once the run is damaged
+    assert r.counts["stations.jsonl"] == 0
+    m = r.stop(4, 0.2)
+    assert m["complete"] is False and "No space" in m["write_error"]
+    assert json.loads((r.path / "manifest.json").read_text())["complete"] is False
+
+
+def test_stop_writes_the_manifest_even_if_closing_a_file_fails(tmp_path):
+    r = make(tmp_path)
+
+    class BadClose:
+        def close(self):
+            raise OSError("boom")
+
+    r._files["stations.jsonl"] = BadClose()
+    m = r.stop(5, 0.25)
+    assert (r.path / "manifest.json").exists() and m["complete"] is False and "boom" in m["write_error"]
+    assert r._links_raw.closed                                 # the other handles were still closed
+
+
+def test_a_failing_init_does_not_leak_open_files(tmp_path, monkeypatch):
+    import builtins
+    opened = []
+    real_open = builtins.open
+
+    def flaky(file, *a, **k):
+        if str(file).endswith("stations.jsonl"):
+            raise OSError("cannot open")
+        f = real_open(file, *a, **k)
+        opened.append(f)
+        return f
+
+    monkeypatch.setattr(builtins, "open", flaky)
+    with pytest.raises(OSError):
+        make(tmp_path)
+    assert opened and all(f.closed for f in opened)
+
+
+def test_links_can_be_read_while_the_run_is_open_and_after_a_crash_cut_the_file(tmp_path):
+    """Review finding: the documented gzip.open loader raised EOFError mid-run; flush was never tested either."""
+    from src.recording.recorder import iter_link_rows
+    r = make(tmp_path)
+    r.links(1, 0.05, [{"a": 1, "b": 2}, {"a": 3, "b": 4}])
+    got = list(iter_link_rows(links_file(r), ["a", "b"]))                     # no stop(): the stream has no trailer yet
+    assert got == [(1, 0.05, {"a": 1, "b": 2}), (1, 0.05, {"a": 3, "b": 4})]
+    r.links(2, 0.1, [{"a": 5, "b": 6}])
+    raw = links_file(r).read_bytes()
+    r.stop(3, 0.15)
+    links_file(r).write_bytes(raw[:-9])                                       # a crash cuts the file short
+    assert len(list(iter_link_rows(links_file(r)))) >= 2
+    with pytest.raises(EOFError):
+        gzip.decompress(links_file(r).read_bytes())                           # which is why the tolerant reader exists
+
+
+def test_the_gzip_header_has_no_timestamp_so_runs_recorded_at_different_times_are_byte_identical(tmp_path):
+    import time
+    from src.v2x.dsrc_channel import LinkResult
+    link = LinkResult(1, 0.05, 1, 2, "BSM", "V2V", 5.0, True, 23.0, 70.0, 0.0, -50.0, 35.0, 1.0, 1.0, 1.0, True, None)
+
+    def run(name, root):
+        r = RunRecorder(root, name, {}, start_frame=0, start_sim_time=0.0, git_sha="x", utcnow=lambda: NOW)
+        r.links(1, 0.05, [link])
+        r.stop(2, 0.1)
+        return links_file(r).read_bytes()
+    a = run("t", tmp_path / "a")
+    time.sleep(1.1)                                           # a gzip header with the current time would now differ
+    b = run("t", tmp_path / "b")
+    assert a == b

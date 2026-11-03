@@ -597,7 +597,8 @@ class V2XNetwork:
 
     def get_hazards(self) -> List[DENM]:
         """Active admin-injected hazards (virtual stations)."""
-        return [d for d in self.denm_store.values() if d.station_id in self._hazard_tx_power]
+        # tuple(...) copies in one C-level step: the HTTP thread must not iterate a dict the simulation thread is changing
+        return [d for d in tuple(self.denm_store.values()) if d.station_id in self._hazard_tx_power]
 
     def _expire_denms(self, sim_time: float) -> None:
         for key, d in list(self.denm_store.items()):

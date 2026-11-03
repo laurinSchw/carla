@@ -11,7 +11,7 @@
 ``v2x_links.jsonl.gz`` is gzip-compressed and COLUMNAR (the first live recording of 25 vehicles was 28 MB in 30 s as one
 JSON object per link): each line is ``{"frame", "sim_time", "rows": [[...], ...]}`` and the column names are in
 ``manifest.json`` under ``formats.v2x_links.columns``. No value is rounded. The file is flushed after every update, so it
-can be read while the run is in progress.
+can be read while the run is in progress with ``iter_link_rows`` (plain ``gzip.open`` raises EOFError on an unfinished stream).
 
 Rules (handoff §4): every record carries ``frame`` and ``sim_time``; wall-clock time appears only in the manifest;
 values are written at full precision, never rounded or decimated; non-finite numbers become ``null``. With the same
@@ -24,9 +24,11 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import logging
 import math
 import re
 import time
+import zlib
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +39,8 @@ from src.lidar import protocol
 class RunAlreadyRecording(Exception):
     """Only one run can be recorded at a time (HTTP 409)."""
 
+
+logger = logging.getLogger(__name__)
 
 FILES = ("events.jsonl", "stations.jsonl", "v2x_links.jsonl")
 LINKS_FILE = "v2x_links.jsonl.gz"  # logical name "v2x_links.jsonl" in row_counts
@@ -82,23 +86,37 @@ class RunRecorder:
     ) -> None:
         self._wall = wall_clock
         started = utcnow()
-        self.run_id = f"{started:%Y%m%dT%H%M%SZ}_{git_sha[:8]}_{_slug(name)}"
-        self.path = Path(root) / self.run_id
-        self.path.mkdir(parents=True, exist_ok=False)
+        base = f"{started:%Y%m%dT%H%M%SZ}_{git_sha[:8]}_{_slug(name)}"
+        self.run_id, n = base, 1
+        Path(root).mkdir(parents=True, exist_ok=True)
+        while True:  # two runs in the same second (stop + immediate restart) or names that slug alike must not collide
+            self.path = Path(root) / self.run_id
+            try:
+                self.path.mkdir(exist_ok=False)
+                break
+            except FileExistsError:
+                n += 1
+                self.run_id = f"{base}-{n}"
+        self.write_error: Optional[str] = None
+        self._files: Dict[str, Any] = {}
+        self._links_raw = None
+        self._lidar_meta = None
         self.record_links = record_links
         self.record_lidar = record_lidar
         self.counts: Dict[str, int] = {f: 0 for f in FILES}
         self.counts["lidar_frames"] = 0
-        # gzip header: no file name, mtime 0 -> the compressed bytes depend only on the data (reproducible runs)
-        self._links_raw = open(self.path / LINKS_FILE, "wb")
-        self._files = {
-            f: (io.TextIOWrapper(gzip.GzipFile(filename="", mode="wb", fileobj=self._links_raw, compresslevel=3, mtime=0),
-                                 encoding="utf-8", newline="\n")
-                if f == "v2x_links.jsonl" else open(self.path / f, "w", encoding="utf-8", newline="\n"))
-            for f in FILES
-        }
+        try:
+            # gzip header: no file name, mtime 0 -> the compressed bytes depend only on the data (reproducible runs)
+            self._links_raw = open(self.path / LINKS_FILE, "wb")
+            for f in FILES:
+                self._files[f] = (
+                    io.TextIOWrapper(gzip.GzipFile(filename="", mode="wb", fileobj=self._links_raw, compresslevel=3, mtime=0),
+                                     encoding="utf-8", newline="\n")
+                    if f == "v2x_links.jsonl" else open(self.path / f, "w", encoding="utf-8", newline="\n"))
+        except BaseException:
+            self._close_handles()   # do not leak the handles that were opened before the failure
+            raise
         self._link_columns: Optional[List[str]] = None
-        self._lidar_meta = None
         self.closed = False
         self._manifest = {
             "run_id": self.run_id, "name": name, "git_sha": git_sha,
@@ -156,15 +174,27 @@ class RunRecorder:
         """Close the files and write the final manifest. Safe to call twice."""
         if not self.closed:
             self.closed = True
-            for f in self._files.values():
-                f.close()
-            self._links_raw.close()
-            if self._lidar_meta is not None:
-                self._lidar_meta.close()
+            close_errors = self._close_handles()
+            if close_errors and self.write_error is None:
+                self.write_error = "; ".join(close_errors)
             self._manifest.update({"end_frame": frame, "end_sim_time": sim_time, "ended_wall_time_unix": self._wall(),
-                                   "row_counts": dict(self.counts), "complete": True})
+                                   "row_counts": dict(self.counts), "complete": self.write_error is None})
+            if self.write_error is not None:
+                self._manifest["write_error"] = self.write_error  # the files are incomplete or damaged: say so
             self._write_manifest(final=True)
         return dict(self._manifest)
+
+    def _close_handles(self) -> List[str]:
+        """Close every open file, whatever fails, so one bad handle cannot leave the others (and the manifest) behind."""
+        errors = []
+        for f in list(self._files.values()) + [self._links_raw, self._lidar_meta]:
+            if f is None:
+                continue
+            try:
+                f.close()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{type(exc).__name__}: {exc}")
+        return errors
 
     def summary(self) -> dict:
         return {"run_id": self.run_id, "path": str(self.path), "row_counts": dict(self.counts),
@@ -172,14 +202,20 @@ class RunRecorder:
 
     # -- internals -------------------------------------------------------------------------------
     def _line(self, name: str, obj: dict) -> None:
-        if self.closed:
+        if self.closed or self.write_error is not None:
             return
-        f = self._files[name]
-        f.write(dumps(obj) + "\n")
-        f.flush()  # a run can be read (tail -f, plots) while it is still being recorded; a crash loses at most one row
-        if name == "v2x_links.jsonl":
-            self._links_raw.flush()
-        self.counts[name] += 1
+        try:
+            f = self._files[name]
+            f.write(dumps(obj) + "\n")
+            f.flush()  # a run can be read (tail -f, plots) while it is still being recorded; a crash loses at most one row
+            if name == "v2x_links.jsonl":
+                self._links_raw.flush()
+            self.counts[name] += 1
+        except OSError as exc:
+            # A failed write can leave half a row or a damaged gzip stream behind. Stop writing altogether and say so in the
+            # manifest, instead of carrying on and reporting a complete run (disk full, permissions, ...).
+            self.write_error = f"{type(exc).__name__}: {exc}"
+            logger.error("run %s: writing %s failed, recording stopped: %s", self.run_id, name, self.write_error)
 
     def _write_manifest(self, final: bool) -> None:
         tmp = self.path / "manifest.json.tmp"
@@ -201,3 +237,22 @@ def list_runs(root: Path) -> List[dict]:
             continue
         out.append({k: m.get(k) for k in ("run_id", "name", "started_utc", "start_frame", "end_frame", "complete", "row_counts")})
     return out
+
+
+def iter_link_rows(path, columns: Optional[List[str]] = None):
+    """Yield ``(frame, sim_time, row)`` for every link record in a ``v2x_links.jsonl.gz`` file, tolerating a file that is still
+    being written or was cut off by a crash (``gzip.open`` raises ``EOFError`` there; this reads everything that is complete).
+
+    With ``columns`` (``manifest["formats"]["v2x_links"]["columns"]``) rows come as dicts.
+    """
+    data = Path(path).read_bytes()
+    text = zlib.decompressobj(31).decompress(data).decode("utf-8", errors="ignore")  # 31 = gzip wrapper, stops at the end of data
+    for line in text.split("\n"):
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            break  # a half-written last line
+        for row in obj["rows"]:
+            yield obj["frame"], obj["sim_time"], (dict(zip(columns, row)) if columns else row)

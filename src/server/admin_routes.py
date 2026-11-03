@@ -19,7 +19,7 @@ from dataclasses import asdict
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Header, Depends, Query
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.recording.recorder import RunAlreadyRecording
 from src.server.route_utils import ConflictError, on_sim_thread
@@ -72,6 +72,14 @@ class TrafficRequest(BaseModel):
 class PedestrianRequest(BaseModel):
     count: int = Field(default=15, ge=1, le=100)
 
+class DriverMixRequest(BaseModel):
+    """Share of each driver archetype in the background traffic (normalised; not all zero)."""
+    model_config = ConfigDict(extra="forbid")
+    cautious: float = Field(default=0.2, ge=0.0, allow_inf_nan=False)
+    normal: float = Field(default=0.6, ge=0.0, allow_inf_nan=False)
+    aggressive: float = Field(default=0.2, ge=0.0, allow_inf_nan=False)
+
+
 class ConnectRequest(BaseModel):
     carla_host: str = Field(default="192.168.1.110")
     carla_port: int = Field(default=2000, ge=1, le=65535)
@@ -81,7 +89,7 @@ class ConnectRequest(BaseModel):
     v2x_update_rate_hz: float = Field(default=2.0, gt=0, le=20.0)
     seed: int = Field(default=42, description="Master seed: spawns, Traffic Manager, pedestrians, driver profiles, channel.")
     drivers_enabled: bool = Field(default=True, description="Seeded driver profiles (cautious/normal/aggressive) for background traffic.")
-    driver_mix: dict = Field(default_factory=lambda: {"cautious": 0.2, "normal": 0.6, "aggressive": 0.2})
+    driver_mix: "DriverMixRequest" = Field(default_factory=lambda: DriverMixRequest())
     advisory_enabled: bool = Field(default=False, description="V2X-assisted slow-down for vehicles that received threatening BSMs.")
     advisory_trigger_level: int = Field(default=3, ge=1, le=4)
     tm_port: int = Field(default=8001, ge=1024, le=65535)
@@ -134,7 +142,7 @@ async def connect_world(req: ConnectRequest):
             v2x_update_rate_hz=req.v2x_update_rate_hz,
             seed=req.seed,
             drivers_enabled=req.drivers_enabled,
-            driver_mix=DriverMix(**req.driver_mix),
+            driver_mix=DriverMix(**req.driver_mix.model_dump()),
             advisory=AdvisoryConfig(enabled=req.advisory_enabled, trigger_level=req.advisory_trigger_level),
             tm_port=req.tm_port,
         )
@@ -365,9 +373,9 @@ async def list_runs_endpoint():
 
 
 class HazardRequest(BaseModel):
-    x: float = Field(description="CARLA world x of the hazard (metres)")
-    y: float = Field(description="CARLA world y of the hazard (metres)")
-    z: float = 0.0
+    x: float = Field(allow_inf_nan=False, description="CARLA world x of the hazard (metres)")
+    y: float = Field(allow_inf_nan=False, description="CARLA world y of the hazard (metres)")
+    z: float = Field(default=0.0, allow_inf_nan=False)
     cause_code: int = Field(default=10, ge=0, le=255, description="ETSI cause code; 10 = obstacle on road, 2 = accident, 3 = road works")
     duration_s: float = Field(default=30.0, gt=0, le=3600, description="Simulation seconds the warning stays valid")
     relevance_distance_m: float = Field(default=150.0, gt=0, le=2000)

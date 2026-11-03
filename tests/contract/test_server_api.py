@@ -409,19 +409,6 @@ def test_run_endpoints_require_the_admin_token_and_a_running_world(client, world
     assert client.post("/admin/runs", json={"name": "x"}, headers=AUTH).status_code == 503
 
 
-def test_connect_request_carries_seed_drivers_and_advisory_settings():
-    from src.server.admin_routes import ConnectRequest
-    from src.server.world_config import WorldConfig
-    from src.traffic.advisory import AdvisoryConfig
-    from src.traffic.drivers import DriverMix
-    req = ConnectRequest(carla_host="h", seed=7, drivers_enabled=False, driver_mix={"cautious": 1, "normal": 0, "aggressive": 0},
-                         advisory_enabled=True, advisory_trigger_level=2)
-    cfg = WorldConfig(host="h", seed=req.seed, drivers_enabled=req.drivers_enabled, driver_mix=DriverMix(**req.driver_mix),
-                      advisory=AdvisoryConfig(enabled=req.advisory_enabled, trigger_level=req.advisory_trigger_level))
-    assert cfg.seed == 7 and cfg.drivers_enabled is False and cfg.advisory.enabled and cfg.advisory.trigger_level == 2
-    assert cfg.driver_mix.weights() == [1.0, 0.0, 0.0]
-
-
 # --- hazard warnings -------------------------------------------------------
 
 def test_hazard_lifecycle_over_http(client, world):
@@ -446,3 +433,88 @@ def test_hazard_validation_and_errors(client, world):
     r = client.post("/admin/v2x/hazards", json=ok, headers=AUTH)
     assert r.status_code == 409 and "disabled" in r.json()["detail"]
     assert client.post("/admin/v2x/hazards", json=ok).status_code == 422                                     # token header missing
+
+
+# --- /admin/connect really passes every setting to the world ------------------
+
+@pytest.fixture
+def fake_world_class(monkeypatch):
+    """Replace PersistentCARLAServer by a recorder of the WorldConfig it receives (no CARLA needed)."""
+    import importlib
+    import sys
+    from tests.unit.carla_stub import Recorder, make_carla_module
+    monkeypatch.setitem(sys.modules, "carla", make_carla_module(Recorder()))
+    sys.modules.pop("src.server.persistent_world", None)
+    pw = importlib.import_module("src.server.persistent_world")
+    captured = {}
+
+    class FakeServer:
+        def __init__(self, config):
+            captured["config"] = config
+            self.sessions = type("S", (), {"all_sessions": staticmethod(lambda: [])})()
+            self._running = True
+
+        def start(self):
+            captured["started"] = True
+
+        def stop(self):
+            captured["stopped"] = True
+
+        def get_status(self):
+            return {"running": True}
+
+    monkeypatch.setattr(pw, "PersistentCARLAServer", FakeServer)
+    yield captured
+    import src.server.admin_routes as admin_mod
+    admin_mod._connect_state, admin_mod._connect_error = "idle", None
+    sys.modules.pop("src.server.persistent_world", None)
+
+
+def _wait_connected():
+    import time
+    import src.server.admin_routes as admin_mod
+    end = time.time() + 5
+    while time.time() < end and admin_mod._connect_state == "connecting":
+        time.sleep(0.02)
+    return admin_mod._connect_state
+
+
+def test_connect_passes_every_setting_to_the_world_config(client, fake_world_class):
+    body = {"carla_host": "10.1.2.3", "carla_port": 2002, "tm_port": 8123, "v2x_enabled": True, "v2x_range": 120.0,
+            "v2x_penetration_rate": 0.5, "v2x_update_rate_hz": 4.0, "seed": 7, "drivers_enabled": False,
+            "driver_mix": {"cautious": 1.0, "normal": 0.0, "aggressive": 0.0},
+            "advisory_enabled": True, "advisory_trigger_level": 2}
+    assert client.post("/admin/connect", json=body, headers=AUTH).status_code == 200
+    assert _wait_connected() == "running"
+    cfg = fake_world_class["config"]
+    assert (cfg.host, cfg.port, cfg.tm_port) == ("10.1.2.3", 2002, 8123)
+    assert (cfg.v2x_range_m, cfg.v2x_penetration_rate, cfg.v2x_update_rate_hz, cfg.seed) == (120.0, 0.5, 4.0, 7)
+    assert cfg.drivers_enabled is False and cfg.driver_mix.weights() == [1.0, 0.0, 0.0]
+    assert cfg.advisory.enabled is True and cfg.advisory.trigger_level == 2
+    assert fake_world_class["started"] is True
+
+
+@pytest.mark.parametrize("mix", [
+    '{"normal": NaN}', '{"normal": Infinity}', '{"normal": -1}', '{"cautious": 0, "normal": 0, "aggressive": 0}',
+    '{"normal": "high"}', '{"turbo": 1}',
+])
+def test_a_bad_driver_mix_is_rejected_with_422_before_the_running_world_is_touched(client, fake_world_class, mix):
+    """Review finding: NaN passed validation and crashed the spawn half-way (leaked vehicles); a bad mix also stopped the old world."""
+    r = client.post("/admin/connect", content='{"carla_host": "h", "driver_mix": %s}' % mix,
+                    headers={**AUTH, "Content-Type": "application/json"})
+    assert r.status_code == 422, (mix, r.status_code, r.text[:200])
+    assert "config" not in fake_world_class                 # no world was even constructed
+
+
+def test_hazard_coordinates_must_be_finite(client, world):
+    for bad in ("NaN", "Infinity", "-Infinity"):
+        r = client.post("/admin/v2x/hazards", content='{"x": %s, "y": 0}' % bad, headers={**AUTH, "Content-Type": "application/json"})
+        assert r.status_code == 422, bad
+    assert client.get("/admin/v2x/hazards", headers=AUTH).json() == []
+
+
+def test_shutdown_stops_the_world_so_runs_are_closed_and_carla_is_released(world):
+    """Review finding: worlds created via /admin/connect were never stopped (no gzip trailer, actors left, CARLA stuck in sync mode)."""
+    with TestClient(app_mod.app):
+        assert world.stopped is False
+    assert world.stopped is True

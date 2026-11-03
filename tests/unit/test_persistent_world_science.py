@@ -14,6 +14,9 @@ from tests.unit.carla_stub import Recorder, make_carla_module
 
 SIM = "carla-tick"
 
+from types import SimpleNamespace as _NS
+NS_SNAPSHOT = _NS(find=lambda i: None)
+
 
 @pytest.fixture
 def env(monkeypatch, tmp_path):
@@ -244,3 +247,149 @@ def test_publishing_and_clearing_a_hazard_is_recorded_and_needs_v2x(env):
     from src.server.route_utils import ConflictError
     with pytest.raises(ConflictError, match="V2X is disabled"):
         off.submit(off.publish_hazard, 0.0, 0.0).result(5)
+
+
+# ── fixes from the independent review ────────────────────────────────────────
+
+def test_lidar_lifecycle_events_reach_the_run_recording(env):
+    """Review finding: the manager's event carried a `frame` key that clashed with the recorder's own, so every LiDAR event was lost."""
+    rec, make, _ = env
+    srv = make()
+    run = srv.submit(srv.start_run, "lidar events").result(5)
+    session = srv.sessions.create_session("c", "127.0.0.1", "vehicle.test.car0", None)
+    srv.submit(srv.spawn_client_vehicle, session.session_id, "vehicle.test.car0").result(5)
+    srv.submit(srv.enable_client_lidar, session.session_id).result(5)
+    assert _wait(lambda: (srv.get_client_lidar_info(session.session_id) or {}).get("state") == "active")
+    srv.submit(srv.stop_run).result(5)
+    events = [json.loads(l) for l in (Path(run["path"]) / "events.jsonl").read_text().splitlines()]
+    lidar = [e for e in events if e["kind"] == "lidar"]
+    assert [e["state"] for e in lidar][:4] == ["requested", "spawning", "warming_up", "active"]
+    assert all("frame" in e and "lidar_frame" in e and e["sensor_id"] == lidar[0]["sensor_id"] for e in lidar)
+
+
+def test_a_failure_while_setting_up_one_vehicle_does_not_leak_the_rest(env):
+    """Review finding: an exception in the per-vehicle setup left the remaining spawned actors untracked (never destroyed)."""
+    rec, make, _ = env
+    srv = make()
+    calls = {"n": 0}
+    real = srv._drivers.next_profile
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("profile draw failed")
+        return real()
+
+    srv._drivers.next_profile = flaky
+    spawned = srv.submit(srv.spawn_background_traffic, 6).result(5)
+    assert spawned == 6 and len(srv._background_vehicles) == 6          # all tracked although one setup step failed
+    assert srv.submit(srv.despawn_background_traffic).result(5) == 6
+    destroyed = [c for c in rec.calls if c[0] == "client.apply_batch_sync"]
+    assert destroyed and destroyed[-1][2]["n"] == 6
+
+
+def test_the_advisory_also_works_when_the_driver_profiles_are_switched_off(env):
+    """Review finding: with drivers disabled the advisory silently did nothing (it iterated the profile dict)."""
+    rec, make, _ = env
+    srv = make(drivers_enabled=False, advisory=AdvisoryConfig(enabled=True, trigger_level=3, extra_slowdown_pct=40.0, hold_s=1.0))
+    srv.submit(srv.spawn_background_traffic, 1).result(5)
+    victim = srv._background_vehicles[0]
+
+    class Net:
+        vehicles = {victim.id: victim}
+        denm_inbox = {}
+
+        def get_threats(self, vid):
+            return [{"level": 4}]
+
+        def get_bsm(self, vid):
+            return None
+
+    srv.v2x_network = Net()
+    srv.submit(lambda: srv._advisory_step(5.0)).result(5)
+    applied = [c[2][1][0] for c in rec.calls if c[0] == "tm.vehicle_percentage_speed_difference" and c[2][0] == victim.id]
+    assert applied == [srv.config.global_speed_pct + 40.0]
+
+
+def test_links_of_a_previous_update_are_never_stamped_with_a_new_frame(env):
+    """Review finding: if the V2X update raised, the previous update's links were recorded under the new frame."""
+    rec, make, _ = env
+    srv = make()
+    srv.submit(srv.start_run, "stale").result(5)
+
+    class Net:
+        vehicles = {}
+
+        def get_rsus(self):
+            return {}
+
+        def get_all_vruam(self):
+            return {}
+
+        def get_link_results(self):
+            return [{"stale": True}]
+
+    srv.v2x_network = Net()
+    srv.submit(lambda: srv._record_v2x(NS_SNAPSHOT, links_valid=False)).result(5)
+    srv.submit(lambda: srv._record_v2x(NS_SNAPSHOT, links_valid=True)).result(5)
+    assert srv.recorder.counts["stations.jsonl"] == 2 and srv.recorder.counts["v2x_links.jsonl"] == 1
+
+
+def test_a_kick_followed_by_the_websocket_cleanup_logs_the_leave_once(env):
+    rec, make, _ = env
+    srv = make()
+    run = srv.submit(srv.start_run, "leave").result(5)
+    session = srv.sessions.create_session("c", "127.0.0.1", "vehicle.test.car0", None)
+    srv.submit(srv.spawn_client_vehicle, session.session_id, "vehicle.test.car0").result(5)
+    srv.submit(srv.despawn_client_vehicle, session.session_id).result(5)
+    srv.submit(srv.despawn_client_vehicle, session.session_id).result(5)          # the cleanup that follows a kick
+    srv.submit(srv.stop_run).result(5)
+    kinds = [json.loads(l)["kind"] for l in (Path(run["path"]) / "events.jsonl").read_text().splitlines()]
+    assert kinds.count("client_leave") == 1
+
+
+def test_stop_is_idempotent_so_the_shutdown_hook_and_the_live_flag_can_both_call_it(env):
+    rec, make, _ = env
+    srv = make()
+    srv.stop()
+    n = len(rec.calls)
+    srv.stop()
+    assert len(rec.calls) == n
+
+
+def test_git_sha_is_looked_up_once_not_per_run(monkeypatch):
+    import subprocess
+    pw = importlib.import_module("src.server.persistent_world")
+    monkeypatch.setattr(pw, "_GIT_SHA", None)
+    monkeypatch.delenv("GIT_SHA", raising=False)
+    count = {"n": 0}
+
+    def fake_run(*a, **k):
+        count["n"] += 1
+        return subprocess.CompletedProcess(a, 0, stdout="abc1234\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert pw._git_sha() == pw._git_sha() == "abc1234" and count["n"] == 1
+
+
+def test_hazards_can_be_listed_from_another_thread_while_they_are_published_and_expire():
+    """Review finding: get_hazards iterated the live dict -> 'dictionary changed size during iteration' on the HTTP thread."""
+    import threading
+    from src.v2x.network import V2XNetwork
+    net = V2XNetwork(max_range=None)
+    errors, stop = [], threading.Event()
+
+    def reader():
+        while not stop.is_set():
+            try:
+                net.get_hazards()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+    t = threading.Thread(target=reader)
+    t.start()
+    for i in range(400):
+        net.publish_hazard((0.0, 0.0, 0.0), duration_s=0.5, sim_time=float(i))
+        net._expire_denms(float(i) + 0.6)
+    stop.set(); t.join()
+    assert errors == []
