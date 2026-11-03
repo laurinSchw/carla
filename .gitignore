@@ -75,3 +75,4 @@ stress_test_results_*/
 
 # recorded simulation runs (large, machine-specific)
 runs/
+.coverage
