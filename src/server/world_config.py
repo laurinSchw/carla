@@ -7,6 +7,8 @@ this class existed (Phase 2 is a refactor, not a model change).
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.lidar.config import LidarLimits
+
 
 class WorldConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -35,6 +37,9 @@ class WorldConfig(BaseModel):
     # Share of background (non-client) vehicles that are V2X stations (handoff S3 / D2).
     # 1.0 = all equipped; client vehicles are always stations.
     v2x_penetration_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    # LiDAR resource policy (sensor count, points/s budget, auto-release, frame wait)
+    lidar: LidarLimits = Field(default_factory=LidarLimits)
 
     # web server port, only used to reject a clashing tm_port
     web_port: int = 8000

@@ -17,6 +17,7 @@ class Recorder:
         self.actors = {}
         self.lock = threading.Lock()
         self.foreign_ticks = 0
+        self.sensors = []  # live LiDAR stubs, fed on every tick
 
     def rec(self, name, extra=None):
         with self.lock:
@@ -25,7 +26,11 @@ class Recorder:
     def tick(self):
         with self.lock:
             self.frame += 1
-            return self.frame
+            frame = self.frame
+            sensors = list(self.sensors)
+        for sensor in sensors:  # real CARLA delivers on its own thread shortly after the tick
+            sensor.deliver(frame)
+        return frame
 
 
 class Vec:
@@ -89,6 +94,8 @@ class BlueprintLibrary:
 
     def find(self, bid):
         self.rec.rec("bp_find", bid)
+        if bid.startswith("sensor.lidar"):
+            return Blueprint(bid)
         for bp in self.vehicles + self.walkers:
             if bp.id == bid:
                 return bp
@@ -149,6 +156,45 @@ class Actor:
 
     def set_max_speed(self, v):
         self.rec.rec("controller.set_max_speed", self.id)
+
+
+class LidarSensorStub(Actor):
+    """Stands in for a CARLA LiDAR: after every tick it hands the listener a measurement of that frame."""
+
+    POINTS = 200
+
+    def __init__(self, rec, actor_id, bp, transform, parent):
+        super().__init__(rec, actor_id, bp, transform)
+        self.parent, self.callback, self.listening = parent, None, False
+
+    def listen(self, callback):
+        self.rec.rec("sensor.listen", self.id)
+        self.callback, self.listening = callback, True
+
+    def stop(self):
+        self.rec.rec("sensor.stop", self.id)
+        self.listening = False
+
+    def destroy(self):
+        self.rec.rec("sensor.destroy", self.id)
+        self.listening = False
+        with self.rec.lock:
+            if self in self.rec.sensors:
+                self.rec.sensors.remove(self)
+        return super().destroy()
+
+    def deliver(self, frame):
+        if not (self.listening and self.callback):
+            return
+        import numpy as np
+        raw = np.zeros(self.POINTS, dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("cos_inc", "<f4"),
+                                           ("object_idx", "<u4"), ("tag", "<u4")])
+        raw["x"] = np.arange(self.POINTS)
+        raw["object_idx"] = self.parent.id
+        loc = self.parent.transform.location
+        self.callback(types.SimpleNamespace(
+            frame=frame, raw_data=raw.tobytes(), timestamp=frame * 0.05,
+            transform=Transform(Location(loc.x, loc.y, loc.z + 2.4), Rotation(0.0, 90.0, 0.0))))
 
 
 class _ActorSnap:
@@ -232,6 +278,19 @@ class World:
     def get_actor(self, actor_id):
         self.rec.rec("world.get_actor", actor_id)
         return self.rec.actors.get(actor_id)
+
+    def spawn_actor(self, bp, transform, attach_to=None):
+        self.rec.rec("world.spawn_actor", bp.id)
+        self.rec.next_id += 1
+        if bp.id.startswith("sensor.lidar"):
+            sensor = LidarSensorStub(self.rec, self.rec.next_id, bp, transform, attach_to)
+            self.rec.actors[sensor.id] = sensor
+            with self.rec.lock:
+                self.rec.sensors.append(sensor)
+            return sensor
+        a = Actor(self.rec, self.rec.next_id, bp, transform)
+        self.rec.actors[a.id] = a
+        return a
 
     def try_spawn_actor(self, bp, transform, attach_to=None):
         self.rec.rec("world.try_spawn_actor")

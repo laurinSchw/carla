@@ -224,3 +224,34 @@ citations for the MAC term, "ETSI EN 302 663 Class A 23 dBm" and "ETSI TR 101 60
 defaults*), and the NLOS docstring (vehicles only, no buildings). The MAC term is labelled EXPERIMENTAL / uncalibrated; `channel_busy_ratio` is
 documented as unused. DENM cause-code numbers are marked unverified. **Not changed (open):** i.i.d. shadowing and sigmoid-then-Bernoulli (S5),
 the MAC placeholder constants (S6), building occlusion (S20), a calibration against a cited dataset (needs your decision D5).
+
+## Phase 4 — LiDAR on request (2026-11-03, branch `developer`)
+
+New package `src/lidar/` (protocol v3, validated config, sensor manager, CARLA backend); the old
+`src/visualization/lidar/collector.py`, `src/utils/binary_protocol.py` (v1/v2 format) and their tests are removed.
+LiDAR data is sensor-frame and not part of the V2X model; no V2X output changes.
+
+- **L1 (wrong sensor→world matrix) — verified against CARLA's own transform** (`carla.Transform.get_matrix()`, available
+  in the venv, no server needed). For a vehicle at pitch 10°, roll 5°, yaw 30° the removed matrix put the point (4, 5, 6)
+  at (3.15, 8.39, 8.62); CARLA gives (0.83, 8.26, 9.15): **2.3 m off**. For flat ground (pitch = roll = 0) both agree.
+  Fix: the server no longer transforms points; it streams raw sensor-frame points plus the sensor's world pose, and
+  `src/lidar/geometry.sensor_to_world` uses `get_matrix()` (pinned for 5 poses against CARLA in `test_lidar_geometry_and_backend.py`).
+- **L2/L8 protocol v3:** header carries `frame`, `sim_time`, `wall_time`, `ego_actor_id`, `sensor_id`, frame-of-reference flags and
+  the sensor pose; `object_idx` is `uint32` (float32 lost ids > 2²⁴). 21 B/point (semantic) vs 20 B before. Wire layout pinned by test.
+- **L3 frame-exact collection:** the CARLA callback only enqueues; each tick takes the measurement of exactly the frame it just ticked
+  (older ones discarded, a missing one counted in `missed_frames`). Every streamed frame id is a ticked frame (stub-server test).
+- **L4 runtime control:** `PUT/DELETE /client/lidar/{session}` request, reconfigure (destroy + respawn at a tick boundary) and
+  release; join with `enable_lidar` still works and now reports why LiDAR was refused (`lidar_error`). Lifecycle
+  `requested → spawning → warming_up → active → reconfiguring/stopping → destroyed | error`, every transition logged with its frame.
+- **Budget/ownership/auto-release:** `WorldConfig.lidar` (`max_sensors` 4, `max_total_points_per_second` 2 M, `keep_alive_s` 10, `frame_timeout_s` 0.25).
+  Over budget → HTTP 409 `{"error":"lidar_budget_exceeded","requested_pps","available_pps",...}`. A vehicle may only attach to its own actor; only an admin may pin.
+  A sensor without viewers for `keep_alive_s` is destroyed unless pinned or recording raw. Session end destroys its sensors *before* the vehicle.
+- **L5/L6/L7/L9:** streaming subsamples with a fixed seeded permutation per sensor (not a stride) and quantised profiles
+  (10k/25k/50k/all points, `max_hz` a divisor of the sim rate, optional zlib), each frame encoded once per profile and shared;
+  raw listeners get full-resolution frames. `ego_actor_id` is explicit. `rotation_frequency_hz` is validated to equal 1/Δt (HTTP 422 otherwise).
+  No `sleep` in sensor teardown (`stop()` then `destroy()`).
+- **Measured cost (host, numpy):** encoding one 25 k-point frame 1.2 ms (5.1 ms with zlib, 148 kB instead of 513 kB), 100 k points 5.2 ms (20.8 ms zlib).
+  Encoding runs on the WebSocket reader thread, not on the simulation thread; the tick loop only dequeues and wraps the raw buffer.
+  **Not measured:** tick p95 with 3 LiDAR sessions on a live CARLA server (the handoff's Phase 4 acceptance number) — needs a server.
+- **Unverified against CARLA 0.9.16:** the ray_cast-only attribute names (`noise_stddev`, `dropoff_*`, `atmosphere_attenuation_rate`) and that
+  `data.frame` equals the ticked frame in synchronous mode. `tests/server` (`-m carla`) contains the end-to-end check.

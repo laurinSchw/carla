@@ -22,7 +22,8 @@ list S1–S20/C1–C13, target architecture and phase acceptance criteria).
 | 1 Remove monolithic V2V demo plane | done | `developer` |
 | 2 Core skeleton (single sim thread owns CARLA via `SimThreadExecutor`, `WorldConfig`, locked `SessionManager`, 5 Hz WS, contract tests) | **done and merged into `developer`** (2026-11-03). Still open from the Phase 2 list: package layout `sim/`, `api/`, `config.py` (§5.2) — the code still lives in `src/server/` | `developer` |
 | 3 V2X unification | **step 1 done** (`src/v2v` merged into `src/v2x`, one `V2XNetwork`, golden output identical). Model fixes done (details and before/after numbers in `docs/science/CHANGELOG.md`): S2, C7, S17, S8, S9, S10, S11, S3 (penetration rate, D2), S7 (unverified live), S4 (MAP/SPAT/VRUAM through the channel + `LinkResult` + per-vehicle inboxes + `/admin/v2x/links`), S13 (one awareness range), S14 (TTC from velocity vectors and extents), S18/S12 (rate config, sim-time rate stat), S1/S5/S6/S15/S16/S20 documented honestly in `docs/science/model.md` (D6: no DB, run directory is the schema). Open: S5 correlated shadowing / S6 calibrated MAC / S20 buildings (need decision D5), CPM generation, ETSI CAM triggering, Phase 4+ (LiDAR rework, WS hub, frontend, recording) | `developer` |
-| 4–8 LiDAR rework, WS hub, new frontend, recording, docs | not started | — |
+| 4 LiDAR on request (`src/lidar/`: protocol v3, manager, budget, REST+WS) | **done, except the live-CARLA acceptance run** (tick p95 with 3 sessions, 32→64 channel reconfigure on a real server) | `developer` |
+| 5–8 WS hub + roles, new frontend, recording, docs | not started | — |
 
 Remaining defects from the handoff list are in `REFACTOR_HANDOFF.md` §3.1 (check which are fixed by Phase 2 before touching them).
 Decisions D1–D13 in the handoff (§7) belong to the human; ask, don't guess.
@@ -47,9 +48,9 @@ src/v2x/
   rsu.py                        RoadSideUnit (MAP/SPAT from CARLA traffic lights)
   network.py                    V2XNetwork: vehicle/RSU/VRU registries, 2 Hz update, neighbours,
                                 threats, DENM store, per-vehicle V2I/V2P inboxes, LinkResult log
-src/visualization/lidar/collector.py    LiDARDataCollector (per-client)
+src/lidar/                      protocol.py (v3 wire format), config.py (LidarConfig, limits, schema), manager.py
+                                (sensor lifecycle, budget, ownership, profiles), carla_backend.py, geometry.py
 src/visualization/web/                  admin_panel.html, client_join.html (stopgap UIs, replaced in Phase 6)
-src/utils/binary_protocol.py            LiDAR wire format
 tests/                          golden/ unit/ v2x/ + loose lidar tests (see §6)
 docs/                           science/CHANGELOG.md (model changes), science/audit.md (stale backlog),
                                 V2V_*.md (older human docs, partly stale), ER_DATABASE_MODEL.*
@@ -80,7 +81,7 @@ The container image is Python 3.10 (`Dockerfile`, `requirements.docker.txt`).
 - **V2X rate 2 Hz** = every 10 frames at 20 FPS; the network also gates on sim time.
 - **Thread safety:** actor lifecycle changes go through `PersistentCARLAServer._lock` (and, after
   Phase 2, only on the simulation thread). Don't block the tick loop (LiDAR cleanup runs in a daemon thread).
-- **Import `carla` lazily** (`TYPE_CHECKING` / inside functions) in `src/v2x` and the collector so
+- **Import `carla` lazily** (`TYPE_CHECKING` / inside functions) in `src/v2x` and `src/lidar` so
   unit tests run without CARLA.
 - **Scientific honesty:** never invent citations or standard section numbers — write "unverified".
   Known unverified/contradicted items: CSMA constants vs. their docstring (code gives PRR factor
@@ -97,21 +98,21 @@ Run in the venv or container, from the repo root: `python -m pytest tests -q -m 
   Regenerate only on purpose: `UPDATE_GOLDEN=1 pytest tests/golden`.
   Floats compare with a 1e-9 relative tolerance (Python 3.10 image vs 3.12 host differ in the last digit); a real model change still fails.
 - `tests/v2x/` — channel, BSM/DENM/CAM, V2X messages/registries, neighbour discovery, scientific integrity.
-- `tests/unit/` — CSMA pins, LiDAR protocol. `tests/test_v2v_lidar.py` — collector transforms.
+- `tests/unit/` — CSMA pins; LiDAR protocol v3, manager (lifecycle/budget/auto-release/profiles), CARLA-handle queue, geometry vs `carla.Transform` (L1), and the real tick loop against the CARLA stub (`test_persistent_world_lidar.py`).
 - `tests/contract/` — API contract tests against `FakeWorld` (no CARLA). `tests/unit/test_sim_executor.py`, `test_persistent_world_threading.py`, `test_world_config.py` — Phase 2 threading.
   `tests/integration/` (`carla`) and `tests/server/` (`server`) — live/deployed smoke tests.
 - Baseline (host, `.venv`, `-m "not carla"`): 299 passed, 11 skipped, 5 xfailed (strict, stale by design: CSMA drops at N=100,
   neighbour tests that never call `broadcast_all`).
 - Known weak tests: `test_lidar_enhanced.py` (untracked; path bug, tests its own mocks),
-  rotation/JSON tests in `test_v2v_lidar.py`, several "stored value" asserts in
+  several "stored value" asserts in
   `test_v2x_messages.py`, mock vehicle/world classes duplicated across four files (needs a conftest).
 
 ## 7. Known gaps (v2x)
 - `CPMMessage` is defined but nothing generates it.
 - Live-CARLA verification is still missing for S2, S7, S9 (`ActorSnapshot.get_acceleration`, `get_group_traffic_lights`) and for N² channel cost with penetration 1.0.
 - Zero latency; shadowing i.i.d.; MAC term is a placeholder; NLOS ignores buildings — see `docs/science/model.md` §4.
-- `binary_protocol.py` is still the V1/V2-style format (v3 planned, handoff §5.4).
-- Untracked, unreviewed: `collector_enhanced.py`, root stress/accuracy scripts, `STRESS_*`/`LIDAR_*` summaries.
+- LiDAR viewer: `client_join.html` only shows a badge; it does not decode v3 frames (Phase 6 JS decoder, `web/static/js/lidar-decoder.js`, is not written).
+- Untracked work files of the owner (hidden from `git add <dir>` by `.git/info/exclude`; never commit them without asking): `collector_enhanced.py` (depends on the removed collector), `tests/test_lidar_enhanced.py` (tests its own mocks), root stress/accuracy scripts, `STRESS_*`/`LIDAR_*` summaries, `docs/LIDAR_SERVER_IMPLEMENTATION.md` (describes the OLD LiDAR design).
 
 ## 8. Conventions
 - Absolute imports from `src`; relative imports inside a subpackage.

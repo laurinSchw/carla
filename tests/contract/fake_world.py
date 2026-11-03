@@ -6,7 +6,33 @@ production code; only spawning and telemetry are faked.
 
 from concurrent.futures import Future
 
+import numpy as np
+
+from src.lidar import protocol
+from src.lidar.config import LidarConfig, LidarLimits
+from src.lidar.manager import LidarError, LidarManager, Measurement, StreamProfile
 from src.server.session_manager import SessionManager
+
+_PT = np.dtype([("x", "f4"), ("y", "f4"), ("z", "f4"), ("cos_inc", "f4"), ("object_idx", "u4"), ("tag", "u4")])
+
+
+class FakeLidarHandle:
+    def __init__(self, config):
+        self.config = config
+
+    def get_measurement(self, frame, timeout_s):
+        n = self.config.points_per_frame(0.05)
+        pts = np.zeros(n, dtype=_PT)
+        pts["x"] = np.arange(n)
+        return Measurement(frame, pts, protocol.SEMANTIC_FIELDS, (0.0, 0.0, 2.4), (0.0, 0.0, 0.0))
+
+    def destroy(self):
+        pass
+
+
+class FakeLidarBackend:
+    def spawn(self, actor_id, config):
+        return FakeLidarHandle(config)
 
 
 class FakeWorld:
@@ -21,6 +47,15 @@ class FakeWorld:
         self.background = 0
         self.pedestrians = 0
         self.v2x_network = None
+        self.fixed_delta_seconds = 0.05
+        self.lidar = LidarManager(FakeLidarBackend(), LidarLimits(max_sensors=2, max_total_points_per_second=1_000_000),
+                                  0.05, seed=1)
+        self._frame = 1000
+
+    def tick_lidar(self, n=1):
+        for _ in range(n):
+            self._frame += 1
+            self.lidar.on_tick(self._frame, self._frame * 0.05)
 
     def submit(self, fn, *args, **kwargs):
         """Mirror PersistentCARLAServer.submit: run now, hand back a Future."""
@@ -58,6 +93,7 @@ class FakeWorld:
         return self._next_actor
 
     def despawn_client_vehicle(self, session_id):
+        self.lidar.destroy_owner_now(session_id)
         self.despawned.append(session_id)
         self.spawned.pop(session_id, None)
 
@@ -70,8 +106,30 @@ class FakeWorld:
     def get_vehicle_v2x_data(self, session_id):
         return {"neighbors": [], "threats": []}
 
-    def enable_client_lidar(self, session_id):
-        return False
+    def enable_client_lidar(self, session_id, config=None):
+        actor_id = self.spawned.get(session_id)
+        if actor_id is None:
+            raise LidarError("session has no vehicle")
+        existing = self.lidar.sensor_of_owner(session_id)
+        if existing is not None:
+            if config is not None:
+                self.lidar.reconfigure(existing["sensor_id"], config, requester=session_id)
+            return self.lidar.get_info(existing["sensor_id"])
+        return self.lidar.get_info(self.lidar.request(session_id, actor_id, config, own_actor_id=actor_id).sensor_id)
+
+    def disable_client_lidar(self, session_id):
+        existing = self.lidar.sensor_of_owner(session_id)
+        if existing is None:
+            return False
+        self.lidar.release(existing["sensor_id"], requester=session_id)
+        return True
+
+    def get_client_lidar_info(self, session_id):
+        return self.lidar.sensor_of_owner(session_id)
+
+    def get_client_lidar_frame(self, session_id, profile=StreamProfile(), after_frame=-1):
+        info = self.get_client_lidar_info(session_id)
+        return None if info is None else self.lidar.get_stream_frame(info["sensor_id"], profile, after_frame)
 
     # --- admin population ------------------------------------------------
     def spawn_background_traffic(self, count):

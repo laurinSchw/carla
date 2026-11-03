@@ -40,6 +40,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 import carla
 
+from src.lidar.carla_backend import CarlaLidarBackend
+from src.lidar.config import LidarConfig
+from src.lidar.manager import LidarError, LidarManager, StreamProfile
 from src.server.session_manager import SessionManager
 from src.server.sim_executor import SimThreadExecutor
 from src.server.world_config import WorldConfig
@@ -117,7 +120,7 @@ class PersistentCARLAServer:
         self.on_session_expired: Optional[Callable[[str], None]] = None
 
         # Per-client LiDAR collectors (session_id → LiDARDataCollector)
-        self._client_lidar_collectors: Dict[str, Any] = {}
+        self.lidar: Optional[LidarManager] = None  # created in start(), driven from the simulation thread
 
     # ------------------------------------------------------------------ #
     # Threading helpers                                                    #
@@ -176,6 +179,11 @@ class PersistentCARLAServer:
         self.bp_lib = self.world.get_blueprint_library()
         self.spawn_points = self.world.get_map().get_spawn_points()
         logger.info("Map has %d spawn points", len(self.spawn_points))
+
+        # LiDAR on request (sensors are created per session, never at start-up)
+        self.lidar = LidarManager(
+            CarlaLidarBackend(self.world), cfg.lidar, cfg.fixed_delta_seconds, seed=cfg.seed,
+        )
 
         # V2X network (V2V + V2I RSU + V2P VRU)
         if self.v2x_enabled:
@@ -276,6 +284,7 @@ class PersistentCARLAServer:
                 self._tick()
                 snapshot = self.world.get_snapshot()
                 self._publish_telemetry(snapshot)
+                self._lidar_tick(snapshot)
                 self._run_periodic_work(snapshot, every_n)
 
             except RuntimeError as exc:
@@ -289,6 +298,15 @@ class PersistentCARLAServer:
                 time.sleep(sleep_for)
 
         logger.info("Tick loop stopped at frame %d", self._frame)
+
+    def _lidar_tick(self, snapshot) -> None:
+        """Advance LiDAR sensors for the frame just ticked. A sensor problem must not stop the simulation."""
+        if self.lidar is None:
+            return
+        try:
+            self.lidar.on_tick(self._frame, float(snapshot.timestamp.elapsed_seconds))
+        except Exception:
+            logger.exception("LiDAR update failed at frame %d (simulation continues)", self._frame)
 
     def _run_periodic_work(self, snapshot, every_n: int) -> None:
         """V2X update and session expiry. An error here must not stop the simulation."""
@@ -590,12 +608,8 @@ class PersistentCARLAServer:
         self._despawn_client_vehicle(session_id)
 
     def _despawn_client_vehicle(self, session_id: str) -> None:
-        collector = self._client_lidar_collectors.pop(session_id, None)
-        if collector is not None:
-            try:
-                collector.cleanup()  # stops/destroys the sensor: CARLA calls, so sim thread
-            except Exception as exc:
-                logger.warning("LiDAR cleanup for session %s: %s", session_id, exc)
+        if self.lidar is not None:
+            self.lidar.destroy_owner_now(session_id)  # stop the sensor before its parent vehicle goes
         actor = self._client_vehicles.pop(session_id, None)
         self._telemetry = {k: v for k, v in self._telemetry.items() if k != session_id}
         self._v2x_payloads = {k: v for k, v in self._v2x_payloads.items() if k != session_id}
@@ -734,46 +748,49 @@ class PersistentCARLAServer:
             "vru_nearby": vru_nearby,
         }
 
-    def enable_client_lidar(self, session_id: str) -> bool:
-        """Attach a LiDAR sensor to the client's vehicle for per-session streaming."""
-        self._require_sim_thread()
-        try:
-            from src.visualization.lidar.collector import LiDARDataCollector
-        except ImportError:
-            logger.warning("LiDAR not available (CARLA not installed)")
-            return False
+    # ------------------------------------------------------------------ #
+    # LiDAR (sim thread for changes; published snapshots for reads)         #
+    # ------------------------------------------------------------------ #
 
+    def enable_client_lidar(self, session_id: str, config: Optional[LidarConfig] = None) -> dict:
+        """Request (or reconfigure) a LiDAR sensor on the session's own vehicle.
+
+        Returns the sensor's info dict. Raises ``LidarError`` (budget 409, forbidden 403, ...).
+        """
+        self._require_sim_thread()
+        if self.lidar is None:
+            raise LidarError("LiDAR is not available")
         actor = self._client_vehicles.get(session_id)
         if actor is None:
-            logger.warning("enable_client_lidar: no vehicle for session %s", session_id)
-            return False
-        if session_id in self._client_lidar_collectors:
-            return True
+            raise LidarError("session has no vehicle", session_id=session_id)
+        existing = self.lidar.sensor_of_owner(session_id)
+        if existing is not None:
+            if config is not None:
+                self.lidar.reconfigure(existing["sensor_id"], config, requester=session_id)
+            return self.lidar.get_info(existing["sensor_id"])
+        sensor = self.lidar.request(session_id, actor.id, config, own_actor_id=actor.id)
+        logger.info("LiDAR requested for session %s (actor=%d, sensor=%d)", session_id, actor.id, sensor.sensor_id)
+        return self.lidar.get_info(sensor.sensor_id)
 
-        collector = LiDARDataCollector(
-            self.world,
-            downsample_factor=2,
-            channels="32",
-            points_per_second="500000",
-        )
-        try:
-            collector.register_vehicle(0, actor)
-        except Exception as exc:
-            logger.error(
-                "LiDAR sensor attach failed for session %s: %s", session_id, exc
-            )
+    def disable_client_lidar(self, session_id: str) -> bool:
+        self._require_sim_thread()
+        existing = self.lidar.sensor_of_owner(session_id) if self.lidar else None
+        if existing is None:
             return False
-
-        self._client_lidar_collectors[session_id] = collector
-        logger.info("LiDAR enabled for session %s (actor=%d)", session_id, actor.id)
+        self.lidar.release(existing["sensor_id"], requester=session_id)
         return True
 
-    def get_client_lidar_binary(self, session_id: str) -> Optional[bytes]:
-        """Return the latest binary point-cloud frame for the session's LiDAR."""
-        collector = self._client_lidar_collectors.get(session_id)
-        if collector is None or not collector.is_active():
+    def get_client_lidar_info(self, session_id: str) -> Optional[dict]:
+        return self.lidar.sensor_of_owner(session_id) if self.lidar else None
+
+    def get_client_lidar_frame(
+        self, session_id: str, profile: StreamProfile = StreamProfile(), after_frame: int = -1
+    ):
+        """(frame, protocol-v3 bytes) of the newest frame after ``after_frame`` for this session's sensor, or None."""
+        info = self.get_client_lidar_info(session_id)
+        if info is None:
             return None
-        return collector.get_combined_pointcloud_binary()
+        return self.lidar.get_stream_frame(info["sensor_id"], profile, after_frame)
 
     # ------------------------------------------------------------------ #
     # Helpers                                                              #
@@ -820,12 +837,11 @@ class PersistentCARLAServer:
     def _cleanup_all(self) -> None:
         """Destroy everything this server spawned (simulation thread, or start() failure)."""
         # Stop LiDAR sensor callbacks before batch-destroying vehicles
-        for sid, collector in list(self._client_lidar_collectors.items()):
+        if self.lidar is not None:
             try:
-                collector.cleanup()
+                self.lidar.shutdown()
             except Exception as exc:
-                logger.warning("LiDAR cleanup for session %s: %s", sid, exc)
-        self._client_lidar_collectors.clear()
+                logger.warning("LiDAR shutdown: %s", exc)
 
         all_actors = (
             list(self._client_vehicles.values())

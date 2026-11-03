@@ -21,8 +21,11 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from src.lidar.config import LidarConfig, lidar_schema
+from src.lidar.manager import LidarError, StreamProfile
 from src.server.route_utils import on_sim_thread
 
 logger = logging.getLogger(__name__)
@@ -83,6 +86,7 @@ class JoinResponse(BaseModel):
     actor_id: int
     ws_url: str
     lidar_ws_url: Optional[str] = None
+    lidar_error: Optional[dict] = None  # set when enable_lidar was asked for but refused (e.g. budget)
     message: str
 
 
@@ -136,19 +140,22 @@ async def join_server(req: JoinRequest, request: Request):
     )
 
     lidar_ws_url: Optional[str] = None
+    lidar_error: Optional[dict] = None
     if req.enable_lidar:
-        lidar_ok = await on_sim_thread(_world, _world.enable_client_lidar, session.session_id)
-        if lidar_ok:
+        try:
+            await on_sim_thread(_world, _world.enable_client_lidar, session.session_id)
             session.lidar_enabled = True
             lidar_ws_url = f"/ws/lidar/{session.session_id}"
-        else:
-            logger.warning("LiDAR enable failed for session %s", session.session_id)
+        except LidarError as exc:  # joining still works without LiDAR; tell the client why
+            lidar_error = exc.detail
+            logger.warning("LiDAR refused for session %s: %s", session.session_id, exc)
 
     return JoinResponse(
         session_id=session.session_id,
         actor_id=actor_id,
         ws_url=f"/ws/client/{session.session_id}",
         lidar_ws_url=lidar_ws_url,
+        lidar_error=lidar_error,
         message=f"Welcome {req.client_name}! Vehicle actor={actor_id} spawned. Session runs {duration_msg}.",
     )
 
@@ -273,21 +280,74 @@ async def client_websocket(websocket: WebSocket, session_id: str):
 
 
 # ------------------------------------------------------------------ #
+# LiDAR on request — REST                                             #
+# ------------------------------------------------------------------ #
+
+def _lidar_error_response(exc: LidarError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status, content=exc.detail)
+
+
+def _active_session(session_id: str):
+    _assert_world_ready()
+    session = _world.sessions.get_session(session_id)
+    if session is None or not session.is_active:
+        raise HTTPException(status_code=404, detail="Invalid or expired session")
+    return session
+
+
+@router.get("/client/lidar/schema", summary="Valid LiDAR settings per sensor type")
+async def lidar_schema_endpoint():
+    return lidar_schema()
+
+
+@router.get("/client/lidar/{session_id}", summary="State of this session's LiDAR sensor")
+async def get_lidar(session_id: str):
+    _active_session(session_id)
+    return {"sensor": _world.get_client_lidar_info(session_id), "budget": _world.lidar.budget()}
+
+
+@router.put("/client/lidar/{session_id}", status_code=202,
+            summary="Request or reconfigure this session's LiDAR (applied at the next tick boundary)")
+async def put_lidar(session_id: str, config: LidarConfig = LidarConfig()):
+    session = _active_session(session_id)
+    try:
+        info = await on_sim_thread(_world, _world.enable_client_lidar, session_id, config)
+    except LidarError as exc:
+        return _lidar_error_response(exc)
+    session.lidar_enabled = True
+    return {"sensor": info, "lidar_ws_url": f"/ws/lidar/{session_id}"}
+
+
+@router.delete("/client/lidar/{session_id}", status_code=202, summary="Release this session's LiDAR")
+async def delete_lidar(session_id: str):
+    session = _active_session(session_id)
+    try:
+        removed = await on_sim_thread(_world, _world.disable_client_lidar, session_id)
+    except LidarError as exc:
+        return _lidar_error_response(exc)
+    session.lidar_enabled = False
+    return {"released": removed}
+
+
+# ------------------------------------------------------------------ #
 # WebSocket — per-client LiDAR binary stream                         #
 # ------------------------------------------------------------------ #
 
 @router.websocket("/ws/lidar/{session_id}")
-async def lidar_websocket(websocket: WebSocket, session_id: str):
+async def lidar_websocket(websocket: WebSocket, session_id: str, max_points: Optional[int] = None,
+                          max_hz: Optional[float] = None, compress: bool = False):
     """
-    Stream binary LiDAR point-cloud frames to a specific client at ~10 Hz.
+    Stream LiDAR frames of this session's sensor as binary protocol v3 (``src/lidar/protocol.py``).
 
-    Uses the same BinaryProtocol V2 format as the global ``/ws`` endpoint.
-    Only available when the client joined with ``enable_lidar: true``.
-    Accepts ``"ping"`` text frames for keep-alive.
+    Query: ``max_points`` (quantised to 10k/25k/50k/all), ``max_hz`` (a divisor of the simulation
+    rate), ``compress`` (zlib). Frames are in the SENSOR frame with the sensor pose in the header.
+    Text messages ``{"type": "state", "state": ..., "frame": ...}`` announce lifecycle changes.
+    Accepts ``"ping"`` for keep-alive. Closing the socket does NOT release the sensor; it is released
+    ``keep_alive_s`` after the last viewer left (or when the session ends).
     """
     await websocket.accept()
 
-    if _world is None:
+    if _world is None or _world.lidar is None:
         await websocket.send_json({"type": "error", "message": "Server not initialised"})
         await websocket.close()
         return
@@ -298,12 +358,16 @@ async def lidar_websocket(websocket: WebSocket, session_id: str):
         await websocket.close()
         return
 
-    if not session.lidar_enabled:
+    info = _world.get_client_lidar_info(session_id)
+    if info is None:
         await websocket.send_json({"type": "error", "message": "LiDAR not enabled for this session"})
         await websocket.close()
         return
 
-    logger.info("LiDAR WS connected: session=%s (%s)", session_id, session.client_name)
+    profile = StreamProfile.quantise(max_points, max_hz, compress, 1.0 / _world.fixed_delta_seconds)
+    sensor_id = info["sensor_id"]
+    _world.lidar.viewer_attached(sensor_id)
+    logger.info("LiDAR WS connected: session=%s (%s) sensor=%d profile=%s", session_id, session.client_name, sensor_id, profile)
 
     async def _receive_loop():
         while True:
@@ -312,6 +376,7 @@ async def lidar_websocket(websocket: WebSocket, session_id: str):
                 await websocket.send_json({"type": "pong"})
 
     receiver = asyncio.create_task(_receive_loop())
+    last_frame, last_state = -1, None
     try:
         while True:
             if not session.is_active or session.is_expired:
@@ -321,8 +386,19 @@ async def lidar_websocket(websocket: WebSocket, session_id: str):
                 receiver.result()
                 break
 
-            payload = _world.get_client_lidar_binary(session_id)
-            if payload is not None:
+            current = _world.get_client_lidar_info(session_id)
+            state = current["state"] if current else "destroyed"
+            if state != last_state:
+                await websocket.send_json({"type": "state", "state": state,
+                                           "frame": current["last_frame"] if current else last_frame,
+                                           "error": current["error"] if current else None})
+                last_state = state
+            if current is None or current["sensor_id"] != sensor_id:
+                break  # released (or replaced): the viewer reconnects if it wants a new sensor
+
+            got = _world.get_client_lidar_frame(session_id, profile, last_frame)
+            if got is not None:
+                last_frame, payload = got
                 await websocket.send_bytes(payload)
 
             await asyncio.sleep(LIDAR_PERIOD_S)
@@ -338,6 +414,7 @@ async def lidar_websocket(websocket: WebSocket, session_id: str):
         logger.error("LiDAR WS error for session %s: %s", session_id, exc)
     finally:
         receiver.cancel()
+        _world.lidar.viewer_detached(sensor_id)
 
 
 # ------------------------------------------------------------------ #

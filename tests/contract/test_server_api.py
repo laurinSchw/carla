@@ -277,3 +277,99 @@ def test_v2x_links_endpoint_filters_and_summarises(client, world):
     spat = client.get("/admin/v2x/links?msg_type=SPAT&rx_id=2", headers=AUTH).json()
     assert [l["drop_cause"] for l in spat["links"]] == ["out_of_awareness_range"]
     assert len(client.get("/admin/v2x/links?limit=1", headers=AUTH).json()["links"]) == 1
+
+
+# --- LiDAR on request ---------------------------------------------------
+
+def _lidar_session(client, world, name="car-1", enable=True):
+    j = _join(client, name, enable_lidar=enable).json()
+    return j
+
+
+def test_join_with_lidar_returns_a_ws_url_and_the_sensor_goes_active_after_ticks(client, world):
+    j = _lidar_session(client, world)
+    assert j["lidar_ws_url"] == f"/ws/lidar/{j['session_id']}" and j["lidar_error"] is None
+    assert client.get(f"/client/lidar/{j['session_id']}").json()["sensor"]["state"] == "requested"
+    world.tick_lidar(2)
+    body = client.get(f"/client/lidar/{j['session_id']}").json()
+    assert body["sensor"]["state"] == "active" and body["budget"]["sensors"] == 1
+
+
+def test_join_still_works_when_the_lidar_budget_is_exhausted_and_says_why(client, world):
+    _lidar_session(client, world, "a")
+    _lidar_session(client, world, "b")
+    j = _lidar_session(client, world, "c")
+    assert j["session_id"] and j["lidar_ws_url"] is None
+    assert j["lidar_error"]["error"] == "lidar_budget_exceeded" and j["lidar_error"]["max_sensors"] == 2
+
+
+def test_put_lidar_reconfigures_and_is_rejected_over_budget_with_409(client, world):
+    sid = _lidar_session(client, world)["session_id"]
+    world.tick_lidar(2)
+    r = client.put(f"/client/lidar/{sid}", json={"channels": 64, "points_per_second": 400000})
+    assert r.status_code == 202 and r.json()["sensor"]["state"] == "reconfiguring"
+    world.tick_lidar(2)
+    info = client.get(f"/client/lidar/{sid}").json()["sensor"]
+    assert info["state"] == "active" and info["config"]["channels"] == 64
+    r = client.put(f"/client/lidar/{sid}", json={"points_per_second": 2000000})
+    assert r.status_code == 409 and r.json()["error"] == "lidar_budget_exceeded"
+    assert r.json()["requested_pps"] == 2000000 and r.json()["available_pps"] == 1000000
+
+
+def test_put_lidar_with_an_invalid_config_is_422_and_wrong_rotation_is_rejected(client, world):
+    sid = _lidar_session(client, world, enable=False)["session_id"]
+    assert client.put(f"/client/lidar/{sid}", json={"channels": 0}).status_code == 422
+    assert client.put(f"/client/lidar/{sid}", json={"noise_stddev": 0.1}).status_code == 422  # semantic sensor
+    r = client.put(f"/client/lidar/{sid}", json={"rotation_frequency_hz": 10.0})
+    assert r.status_code == 422 and r.json()["error"] == "lidar_invalid_config"
+
+
+def test_put_lidar_can_create_a_sensor_after_joining_and_delete_releases_it(client, world):
+    sid = _lidar_session(client, world, enable=False)["session_id"]
+    assert client.get(f"/client/lidar/{sid}").json()["sensor"] is None
+    assert client.put(f"/client/lidar/{sid}", json={}).status_code == 202
+    world.tick_lidar(2)
+    assert client.delete(f"/client/lidar/{sid}").json() == {"released": True}
+    world.tick_lidar()
+    assert client.get(f"/client/lidar/{sid}").json()["sensor"] is None
+    assert client.delete(f"/client/lidar/{sid}").json() == {"released": False}
+
+
+def test_leaving_the_session_destroys_its_sensor(client, world):
+    sid = _lidar_session(client, world)["session_id"]
+    world.tick_lidar(2)
+    client.delete(f"/client/leave/{sid}")
+    assert world.lidar.list_sensors() == []
+
+
+def test_lidar_schema_lists_valid_attributes_per_sensor_type(client, world):
+    schema = client.get("/client/lidar/schema").json()
+    assert "noise_stddev" not in schema["sensor_types"]["semantic"]["attributes"]
+    assert "noise_stddev" in schema["sensor_types"]["raycast"]["attributes"]
+    assert schema["stream_point_buckets"] == [10000, 25000, 50000, "all"]
+
+
+def test_lidar_ws_streams_v3_frames_of_the_ticked_frame_and_counts_viewers(client, world):
+    from src.lidar import protocol
+    j = _lidar_session(client, world)
+    world.tick_lidar(3)
+    sensor_id = world.lidar.sensor_of_owner(j["session_id"])["sensor_id"]
+    with client.websocket_connect(j["lidar_ws_url"] + "?max_points=10000") as ws:
+        state = ws.receive_json()
+        assert state["type"] == "state" and state["state"] == "active"
+        header, points = protocol.decode(ws.receive_bytes())
+        assert header.frame == world._frame and header.sensor_id == sensor_id and header.sensor_frame
+        assert len(points) == 10000                                 # 25k per frame, stream profile caps it
+        assert world.lidar._sensors[sensor_id].viewers == 1
+    assert world.lidar._sensors[sensor_id].viewers == 0              # viewer left; sensor stays until keep-alive
+
+
+def test_lidar_ws_refuses_sessions_without_a_sensor(client, world):
+    sid = _lidar_session(client, world, enable=False)["session_id"]
+    with client.websocket_connect(f"/ws/lidar/{sid}") as ws:
+        assert ws.receive_json()["type"] == "error"
+
+
+def test_lidar_endpoints_reject_unknown_sessions(client, world):
+    assert client.get("/client/lidar/nope").status_code == 404
+    assert client.put("/client/lidar/nope", json={}).status_code == 404

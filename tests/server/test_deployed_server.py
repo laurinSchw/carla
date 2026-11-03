@@ -165,9 +165,9 @@ def test_admin_population_roundtrip(live_world):
 
 @pytest.mark.carla
 def test_lidar_websocket_streams_decodable_frames(live_world, record_property):
-    """Join with LiDAR, read /ws/lidar/{session}, decode frames with BinaryProtocol."""
+    """Join with LiDAR, read /ws/lidar/{session}, decode protocol-v3 frames."""
     sync = pytest.importorskip("websockets.sync.client")
-    from src.utils.binary_protocol import BinaryProtocol
+    from src.lidar import protocol
 
     status, j = live_world.json("POST", "/client/join",
                                 {"client_name": "pytest-lidar", "enable_lidar": True})
@@ -188,13 +188,11 @@ def test_lidar_websocket_streams_decodable_frames(live_world, record_property):
                 if isinstance(msg, str):
                     assert json.loads(msg)["type"] != "error", msg
                     continue
-                decoded = BinaryProtocol.decode(msg)
-                assert decoded is not None, "binary LiDAR frame could not be decoded"
-                pts, meta = decoded
+                header, _pts = protocol.decode(msg)
                 frames += 1
                 sizes.append(len(msg))
-                points.append(meta["num_points"])
-                assert meta["ego_actor_id"] == j["actor_id"]
+                points.append(header.num_points)
+                assert header.ego_actor_id == j["actor_id"]
             elapsed = time.time() - t0
     finally:
         live_world.json("DELETE", f"/client/leave/{sid}")
