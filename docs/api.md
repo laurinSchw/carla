@@ -11,7 +11,22 @@ Authentication: admin endpoints take the header `X-Admin-Token`; vehicle endpoin
 Connect to CARLA and start world
 
 * headers: `X-Admin-Token`
-* body: `ConnectRequest` (carla_host, carla_port, timeout_s, fixed_delta_seconds, max_substep_delta_time, max_substeps, tm_port, seed, global_speed_pct, safety_distance_m, v2x_enabled, awareness_range_m, v2x_update_rate_hz, rsu_max_count, v2x_penetration_rate, drivers_enabled, driver_mix_cautious, driver_mix_normal, driver_mix_aggressive, advisory_enabled, advisory_trigger_level, advisory_extra_slowdown_pct, advisory_hazard_slowdown_pct, advisory_hold_s, lidar_max_sensors, lidar_max_points_per_second, lidar_keep_alive_s, lidar_frame_timeout_s, lidar_max_consecutive_misses, session_disconnect_grace_s, observer_public, client_routes_require_token, world_state_rate_hz, v2x_links_max_rows, event_log_size, realtime)
+* body: `ConnectRequest` (carla_host, carla_port, timeout_s, fixed_delta_seconds, max_substep_delta_time, max_substeps, tm_port, seed, global_speed_pct, safety_distance_m, v2x_enabled, awareness_range_m, v2x_update_rate_hz, rsu_max_count, v2x_penetration_rate, drivers_enabled, driver_mix_cautious, driver_mix_normal, driver_mix_aggressive, advisory_enabled, advisory_trigger_level, advisory_extra_slowdown_pct, advisory_hazard_slowdown_pct, advisory_hold_s, lidar_max_sensors, lidar_max_points_per_second, lidar_keep_alive_s, lidar_frame_timeout_s, lidar_max_consecutive_misses, session_disconnect_grace_s, observer_public, client_routes_require_token, world_state_rate_hz, v2x_links_max_rows, event_log_size, map_name, realtime)
+* success: 200
+
+### `POST /admin/map`
+
+Switch the CARLA map (restarts the world)
+
+* headers: `X-Admin-Token`
+* body: `MapRequest` (map_name)
+* success: 200
+
+### `GET /admin/maps`
+
+Maps the CARLA server can load
+
+* headers: `X-Admin-Token`
 * success: 200
 
 ### `POST /admin/pedestrians`

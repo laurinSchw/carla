@@ -144,16 +144,39 @@ async def connect_world(req: ConnectRequest):
                   if isinstance(exc, ValidationError) else str(exc))
         raise HTTPException(status_code=422, detail=detail)
 
+    _begin_connect(config)
+    return {
+        "ok": True,
+        "message": f"Connecting to CARLA at {req.carla_host}:{req.carla_port} (async)…",
+    }
+
+
+def _begin_connect(config: WorldConfig) -> None:
+    """Stop the running world (if any) and start a new one with ``config`` on a background thread; 409 while one is connecting."""
     global _connect_state, _connect_error
     with _connect_lock:
         if _connect_state == "connecting":
             raise HTTPException(status_code=409, detail="A connect is already in progress")
         _connect_state, _connect_error = "connecting", None
 
+    def _check_map_exists():
+        """A wrong map name must not cost the running world: ask the CARLA server before anything is stopped."""
+        if not config.map_name:
+            return
+        import carla
+        from src.server.persistent_world import PersistentCARLAServer
+        client = carla.Client(config.host, config.port)
+        client.set_timeout(config.timeout_s)
+        available = list(client.get_available_maps())
+        if PersistentCARLAServer.match_map(config.map_name, available) is None:
+            names = ", ".join(sorted(PersistentCARLAServer.short_map_name(m) for m in available))
+            raise ValueError(f"map {config.map_name!r} is not available on the CARLA server; available: {names}")
+
     def _start():
         global _world, _connect_state, _connect_error
         from src.server.persistent_world import PersistentCARLAServer
         try:
+            _check_map_exists()
             # Stop previous world if any
             if _world is not None:
                 try:
@@ -174,17 +197,46 @@ async def connect_world(req: ConnectRequest):
                 _server_module.set_persistent_world(world)
 
             _connect_state = "running"
-            logger.info("Persistent world started via admin /connect (%s:%s)", req.carla_host, req.carla_port)
+            logger.info("Persistent world started via admin /connect (%s:%s)", config.host, config.port)
         except Exception as exc:
-            logger.error("Connect to CARLA %s:%s failed: %s", req.carla_host, req.carla_port, exc)
+            logger.error("Connect to CARLA %s:%s failed: %s", config.host, config.port, exc)
             _connect_error = f"{type(exc).__name__}: {exc}"
             _connect_state = "error"
 
     threading.Thread(target=_start, daemon=True, name="admin-connect").start()
-    return {
-        "ok": True,
-        "message": f"Connecting to CARLA at {req.carla_host}:{req.carla_port} (async)…",
-    }
+
+
+class MapRequest(BaseModel):
+    map_name: str = Field(min_length=1, max_length=128, description="e.g. Town03; see GET /admin/maps")
+
+
+@router.get("/maps", summary="Maps the CARLA server can load", dependencies=[Depends(_require_admin)])
+async def list_maps():
+    _assert_ready()
+    _assert_running()
+    maps = await on_sim_thread(_world, _world.list_maps)
+    return {"current": _world.get_status().get("map"), "maps": maps}
+
+
+@router.post("/map", summary="Switch the CARLA map (restarts the world)", dependencies=[Depends(_require_admin)])
+async def change_map(req: MapRequest):
+    """Load another map and restart the world with the same configuration. ``load_world`` replaces the world on the CARLA
+    server: actors of other users on it are destroyed too (the lab world is shared). Sessions, LiDAR sensors, spawned traffic and an
+    open run end, exactly as with ``/connect``. 422 for a map the CARLA server does not have, 409 while a connect runs."""
+    if _connect_state == "connecting":                      # before _assert_running: a stopping world is not "running"
+        raise HTTPException(status_code=409, detail="A connect is already in progress")
+    _assert_ready()
+    _assert_running()
+    available = await on_sim_thread(_world, _world.list_maps)
+    target = _world.match_map(req.map_name, available)
+    if target is None:
+        raise HTTPException(status_code=422, detail=f"map {req.map_name!r} is not available; available: {', '.join(available)}")
+    try:
+        new_config = WorldConfig.model_validate({**_world.config.model_dump(), "map_name": _world.short_map_name(target)})
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    _begin_connect(new_config)
+    return {"ok": True, "message": f"Loading {target} and restarting the world (async)…"}
 
 
 @router.get("/sessions", summary="All client sessions", dependencies=[Depends(_require_admin)])

@@ -2,6 +2,7 @@
 // sessions, LiDAR management and WebSocket health. The token lives in this tab (sessionStorage) and goes in a header.
 
 import { createApp, renderTopbar, showFakeBanner, credentials } from './app.js';
+import { mapOptions } from './map-options.js';
 import { initObserver } from './observer-core.js';
 import { LidarConfigForm } from './lidar-controls.js';
 import { fieldsFromJsonSchema, renderForm, readForm, validateAll, valuesToConfig, configToValues } from './schema-form.js';
@@ -80,6 +81,9 @@ async function showAdmin() {
 
 // ── connection ──────────────────────────────────────────────────────────────────────────────────
 let lastConnectState = null;
+let reloadWhenUp = false;       // set by Connect / Load map; the reload needs the server to REPORT "connecting" first, then "running"
+let sawConnecting = false;
+let lastElapsed = null;
 
 async function connectionCard() {
   async function refresh() {
@@ -88,26 +92,71 @@ async function connectionCard() {
       $('conn-state').textContent = s.connected ? `${s.connect_state}${s.running ? ' (running)' : ''}` : s.connect_state;
       $('conn-state').className = `badge state-${s.connect_state === 'running' ? 'active' : s.connect_state === 'error' ? 'error' : 'requested'}`;
       $('conn-error').textContent = s.connect_error || '';
-      if (lastConnectState === 'connecting' && s.connect_state === 'running') location.reload();    // new world: new hub
+      if (s.connect_state === 'connecting') sawConnecting = true;
+      if (s.connect_state === 'error') reloadWhenUp = false;
+      // a quick restart can fall between two polls: a world whose uptime went backwards is a new world as well
+      const restarted = lastElapsed !== null && s.elapsed_seconds < lastElapsed;
+      lastElapsed = s.running ? s.elapsed_seconds : null;
+      if (reloadWhenUp && s.connect_state === 'running' && (sawConnecting || restarted)) location.reload();    // new world: new hub
       lastConnectState = s.connect_state;
+      updateMapForm(s);
       if (!asked && (s.connect_state === 'idle' || s.connect_state === 'error') && !s.running) promptForEndpoint();
     } catch { /* the toast of a failed poll would be noise */ }
   }
-  async function connectWorld(host, port) {
+  async function connectWorld(host, port, mapName = '') {
     const body = { carla_host: host, carla_port: port, tm_port: Number($('cn-tm').value),
       v2x_enabled: $('cn-v2x').checked, v2x_update_rate_hz: Number($('cn-rate').value) };
     if ($('cn-rsu').value !== '') body.rsu_max_count = Number($('cn-rsu').value);
+    if (mapName.trim()) body.map_name = mapName.trim();
     try {
       await api.post('/admin/connect', body);
       try { localStorage.setItem('carla.endpoint', JSON.stringify({ host, port })); } catch { /* storage may be blocked */ }
       toast('Connecting… the page reloads when the world is up.', 'info');
-      lastConnectState = 'connecting';
+      reloadWhenUp = true; sawConnecting = false;
       return true;
     } catch { return false; /* the error toast is shown */ } finally { refresh(); }
   }
   $('connect-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    await connectWorld($('cn-host').value, Number($('cn-port').value));
+    await connectWorld($('cn-host').value, Number($('cn-port').value), $('cn-map').value);
+  });
+  // Map: the field is always there (Connect uses it); with a running world the list comes from the CARLA server and Load map works
+  let mapsLoaded = false;
+  function fillMapSelects(available, current) {
+    for (const id of ['cn-map', 'cd-map']) {
+      const sel = $(id);
+      const keep = sel.value;
+      sel.textContent = '';
+      for (const o of mapOptions(available, current, keep)) {
+        const opt = el('option', '', o.label);
+        opt.value = o.value;
+        opt.selected = o.selected;
+        sel.appendChild(opt);
+      }
+    }
+  }
+  fillMapSelects(null, '');                       // before a world runs: the standard CARLA maps
+  async function updateMapForm(s) {
+    $('map-btn').disabled = !s.running;
+    if (!s.running) { if (mapsLoaded) fillMapSelects(null, ''); mapsLoaded = false; return; }
+    if (mapsLoaded) return;
+    mapsLoaded = true;
+    try {
+      const r = await api.get('/admin/maps', { quiet: true });
+      fillMapSelects(r.maps, r.current);
+    } catch { mapsLoaded = false; }
+  }
+  $('map-btn').addEventListener('click', async () => {
+    const map = $('cn-map').value.trim();
+    if (!map) { toast('Pick a map first ("keep current" changes nothing).', 'info'); return; }
+    if (!confirm(`Load ${map}? The world restarts: sessions, sensors, spawned traffic and the run end. CARLA replaces the whole world, so actors of other users on this server are removed too.`)) return;
+    try {
+      await api.post('/admin/map', { map_name: map });
+      toast(`Loading ${map}… the page reloads when the world is up.`, 'info');
+      reloadWhenUp = true; sawConnecting = false;
+      mapsLoaded = false;
+    } catch { /* shown */ }
+    refresh();
   });
   // No world yet: ask for the CARLA address (once per page load; "Later" leaves it to the Connection card)
   let asked = false;
@@ -127,7 +176,7 @@ async function connectionCard() {
     if (!host || !(port >= 1 && port <= 65535)) { $('cd-error').textContent = 'Enter a host and a port between 1 and 65535.'; return; }
     $('cd-error').textContent = '';
     $('cn-host').value = host; $('cn-port').value = port;
-    if (await connectWorld(host, port)) $('connect-dialog').close();
+    if (await connectWorld(host, port, $('cd-map').value)) $('connect-dialog').close();
   });
   $('cd-skip').addEventListener('click', () => $('connect-dialog').close());
   $('disconnect-btn').addEventListener('click', async () => {

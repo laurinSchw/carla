@@ -47,6 +47,19 @@ async def _validation_error(_request: Request, exc: RequestValidationError):
     """422 without echoing the offending input: a NaN/Infinity in the body cannot be serialised back as JSON (it became a 500)."""
     errors = [{k: v for k, v in e.items() if k not in ("input", "ctx", "url")} for e in exc.errors()]
     return JSONResponse(status_code=422, content={"detail": errors})
+
+
+@app.middleware("http")
+async def _revalidate_frontend(request: Request, call_next):
+    """The pages and scripts change with every release and have no build hash in their name: make browsers revalidate them
+    (ETag) instead of showing an old admin page after an update."""
+    response = await call_next(request)
+    path = request.url.path
+    if path in ("/", "/admin", "/observer", "/vehicle") or path.startswith("/static/"):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
 app.include_router(_admin_mod.router)
 app.include_router(_client_mod.router)
 app.include_router(_hub_mod.router)

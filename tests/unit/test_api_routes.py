@@ -108,3 +108,63 @@ def test_map_geometry_builder():
 
     geom = build_map_geometry(NS(name="T", get_topology=lambda: [(Wp(0, 0), Wp(10, 0))]))
     assert geom["lanes"][0][0] == [0.0, 0.0] and geom["lanes"][0][-1] == [10.0, 0.0] and len(geom["version"]) == 16
+
+
+def test_map_list_and_change_restarts_the_world_on_the_new_map(api, monkeypatch):
+    import time
+    import src.server.admin_routes as admin_mod
+    c, h, srv = api
+    admin_mod._world = srv
+    r = c.get("/admin/maps", headers=h)
+    assert r.status_code == 200 and "Town03" in r.json()["maps"] and r.json()["current"].endswith("TestTown")
+    assert c.post("/admin/map", json={"map_name": "Nowhere"}, headers=h).status_code == 422
+    assert c.post("/admin/map", json={"map_name": "town03"}, headers=h).status_code == 200      # name is case-insensitive
+    for _ in range(100):
+        if admin_mod._connect_state == "running" and admin_mod._world is not srv:
+            break
+        time.sleep(0.1)
+    new = admin_mod._world
+    try:
+        assert new is not srv
+        assert new.config.map_name == "Town03"
+        assert new.get_status()["map"].endswith("Town03")
+        assert new.config.seed == srv.config.seed and new.config.runs_dir == srv.config.runs_dir   # same configuration
+    finally:
+        new.stop()
+        admin_mod._world = srv
+
+
+def test_connect_with_a_map_name_loads_it_and_an_unknown_map_fails(api):
+    import pytest as _pytest
+    from src.server.persistent_world import PersistentCARLAServer
+    c, h, srv = api
+    assert PersistentCARLAServer.match_map("Town03", ["/Game/Carla/Maps/Town03", "/Game/Carla/Maps/Town10HD_Opt"]) == "/Game/Carla/Maps/Town03"
+    assert PersistentCARLAServer.match_map("/Game/Carla/Maps/town10hd_opt/", ["/Game/Carla/Maps/Town10HD_Opt"]) == "/Game/Carla/Maps/Town10HD_Opt"
+    assert PersistentCARLAServer.match_map("Town99", ["/Game/Carla/Maps/Town03"]) is None
+    bad = PersistentCARLAServer(WorldConfig(host="stub", map_name="Town99", runs_dir=srv.config.runs_dir))
+    with _pytest.raises(ValueError, match="not available"):
+        bad.start()
+
+
+def test_map_switch_conflicts_and_bad_names_do_not_cost_the_running_world(api):
+    import src.server.admin_routes as admin_mod
+    c, h, srv = api
+    admin_mod._world = srv
+    # a connect with an unknown map must fail before the running world is stopped
+    admin_mod._connect_state = "idle"
+    assert c.post("/admin/connect", json={"carla_host": "stub", "map_name": "Town99"}, headers=h).status_code == 200
+    import time
+    for _ in range(50):
+        if admin_mod._connect_state != "connecting":
+            break
+        time.sleep(0.1)
+    assert admin_mod._connect_state == "error" and "not available" in admin_mod._connect_error
+    assert admin_mod._world is srv and srv._running, "the working world was stopped by a bad map name"
+    # while a connect runs, /admin/map answers 409 (not 503)
+    admin_mod._connect_state = "connecting"
+    try:
+        assert c.post("/admin/map", json={"map_name": "Town03"}, headers=h).status_code == 409
+    finally:
+        admin_mod._connect_state = "idle"
+    # the name is constrained
+    assert c.post("/admin/connect", json={"carla_host": "stub", "map_name": "../x y"}, headers=h).status_code == 422
