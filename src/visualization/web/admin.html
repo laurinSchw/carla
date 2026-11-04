@@ -82,6 +82,7 @@
       <p>No world is running. Enter the address of the CARLA server.</p>
       <div class="field"><label for="cd-host">CARLA host (IP)</label><input id="cd-host" required placeholder="e.g. 192.168.0.109"><span></span></div>
       <div class="field"><label for="cd-port">CARLA port</label><input id="cd-port" type="number" min="1" max="65535" required value="2000"><span></span></div>
+      <div class="field"><label for="cd-map">Map (optional)</label><input id="cd-map" placeholder="e.g. Town03; empty = keep current"><span></span></div>
       <p id="cd-error" class="state-error"></p>
       <div class="row"><button class="primary" id="cd-connect" value="connect">Connect</button><button type="button" id="cd-skip">Later</button></div>
     </form>
@@ -91,19 +92,16 @@
     <form id="connect-form" autocomplete="off">
       <div class="field"><label for="cn-host">CARLA host</label><input id="cn-host" value="127.0.0.1"><span></span></div>
       <div class="field"><label for="cn-port">CARLA port</label><input id="cn-port" type="number" value="2000"><span></span></div>
+      <div class="field"><label for="cn-map">Map</label><input id="cn-map" list="maps-list" placeholder="keep the server's current map"><span></span></div>
+      <datalist id="maps-list"></datalist>
       <div class="field"><label for="cn-tm">Traffic Manager port</label><input id="cn-tm" type="number" value="8001"><span></span></div>
       <div class="field"><label for="cn-v2x">V2X</label><label><input id="cn-v2x" type="checkbox" checked> enabled</label><span></span></div>
       <div class="field"><label for="cn-rate">V2X update rate (Hz)</label><input id="cn-rate" type="number" step="any" value="2"><span class="badge badge-restart">restart</span></div>
       <div class="field"><label for="cn-rsu">RSU limit</label><input id="cn-rsu" type="number" min="0" placeholder="all intersections"><span class="badge badge-restart">restart</span></div>
-      <div class="row"><button class="primary" id="connect-btn">Connect</button><button class="danger" id="disconnect-btn" type="button">Disconnect</button></div>
-    </form>
-    <form id="map-form" autocomplete="off" hidden>
-      <div class="field"><label for="cn-map">Map</label><select id="cn-map"></select><span></span></div>
-      <div class="row"><button class="primary" id="map-btn">Load map</button></div>
-      <p class="stamp">Loads the map on the CARLA server and restarts the world with the same settings.</p>
+      <div class="row"><button class="primary" id="connect-btn">Connect</button><button id="map-btn" type="button" disabled title="available while a world runs">Load map</button><button class="danger" id="disconnect-btn" type="button">Disconnect</button></div>
     </form>
     <p id="conn-error" class="state-error"></p>
-    <p class="stamp">Connecting (re)starts the world: sessions, sensors and the run end. Settings marked restart only apply here.</p>
+    <p class="stamp">Connecting (re)starts the world: sessions, sensors and the run end. Settings marked restart only apply here. Map: leave it empty to keep the CARLA server's map; with a running world pick one and press Load map.</p>
   </section>
 
   <section class="panel" id="card-run" aria-labelledby="c-run-h">

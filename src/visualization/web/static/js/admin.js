@@ -94,10 +94,11 @@ async function connectionCard() {
       if (!asked && (s.connect_state === 'idle' || s.connect_state === 'error') && !s.running) promptForEndpoint();
     } catch { /* the toast of a failed poll would be noise */ }
   }
-  async function connectWorld(host, port) {
+  async function connectWorld(host, port, mapName = '') {
     const body = { carla_host: host, carla_port: port, tm_port: Number($('cn-tm').value),
       v2x_enabled: $('cn-v2x').checked, v2x_update_rate_hz: Number($('cn-rate').value) };
     if ($('cn-rsu').value !== '') body.rsu_max_count = Number($('cn-rsu').value);
+    if (mapName.trim()) body.map_name = mapName.trim();
     try {
       await api.post('/admin/connect', body);
       try { localStorage.setItem('carla.endpoint', JSON.stringify({ host, port })); } catch { /* storage may be blocked */ }
@@ -108,28 +109,26 @@ async function connectionCard() {
   }
   $('connect-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    await connectWorld($('cn-host').value, Number($('cn-port').value));
+    await connectWorld($('cn-host').value, Number($('cn-port').value), $('cn-map').value);
   });
-  // Map switcher: only while a world runs; the list comes from the CARLA server
+  // Map: the field is always there (Connect uses it); with a running world the list comes from the CARLA server and Load map works
   let mapsLoaded = false;
   const lastPart = (m) => String(m || '').split('/').pop();
   async function updateMapForm(s) {
-    const form = $('map-form');
-    form.hidden = !s.running;
+    $('map-btn').disabled = !s.running;
     if (!s.running) { mapsLoaded = false; return; }
     if (mapsLoaded) return;
     mapsLoaded = true;
     try {
       const r = await api.get('/admin/maps', { quiet: true });
-      const sel = $('cn-map');
-      sel.textContent = '';
-      for (const m of r.maps) { const o = el('option', '', m); o.value = m; sel.appendChild(o); }
-      sel.value = lastPart(r.current);
+      const list = $('maps-list');
+      list.textContent = '';
+      for (const m of r.maps) { const o = el('option'); o.value = m; list.appendChild(o); }
+      if (!$('cn-map').value) $('cn-map').value = lastPart(r.current);
     } catch { mapsLoaded = false; }
   }
-  $('map-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const map = $('cn-map').value;
+  $('map-btn').addEventListener('click', async () => {
+    const map = $('cn-map').value.trim();
     if (!map || !confirm(`Load ${map}? The world restarts: sessions, sensors, spawned traffic and the run end.`)) return;
     try {
       await api.post('/admin/map', { map_name: map });
@@ -157,7 +156,7 @@ async function connectionCard() {
     if (!host || !(port >= 1 && port <= 65535)) { $('cd-error').textContent = 'Enter a host and a port between 1 and 65535.'; return; }
     $('cd-error').textContent = '';
     $('cn-host').value = host; $('cn-port').value = port;
-    if (await connectWorld(host, port)) $('connect-dialog').close();
+    if (await connectWorld(host, port, $('cd-map').value)) $('connect-dialog').close();
   });
   $('cd-skip').addEventListener('click', () => $('connect-dialog').close());
   $('disconnect-btn').addEventListener('click', async () => {
