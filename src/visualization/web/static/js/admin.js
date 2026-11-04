@@ -80,7 +80,6 @@ async function showAdmin() {
 }
 
 // ── connection ──────────────────────────────────────────────────────────────────────────────────
-let lastConnectState = null;
 let reloadWhenUp = false;       // set by Connect / Load map; the reload needs the server to REPORT "connecting" first, then "running"
 let sawConnecting = false;
 let lastElapsed = null;
@@ -93,12 +92,11 @@ async function connectionCard() {
       $('conn-state').className = `badge state-${s.connect_state === 'running' ? 'active' : s.connect_state === 'error' ? 'error' : 'requested'}`;
       $('conn-error').textContent = s.connect_error || '';
       if (s.connect_state === 'connecting') sawConnecting = true;
-      if (s.connect_state === 'error') reloadWhenUp = false;
+      if (s.connect_state === 'error' || s.connect_error) reloadWhenUp = false;    // a rejected request: the old world is still the one we show
       // a quick restart can fall between two polls: a world whose uptime went backwards is a new world as well
       const restarted = lastElapsed !== null && s.elapsed_seconds < lastElapsed;
       lastElapsed = s.running ? s.elapsed_seconds : null;
       if (reloadWhenUp && s.connect_state === 'running' && (sawConnecting || restarted)) location.reload();    // new world: new hub
-      lastConnectState = s.connect_state;
       updateMapForm(s);
       if (!asked && (s.connect_state === 'idle' || s.connect_state === 'error') && !s.running) promptForEndpoint();
     } catch { /* the toast of a failed poll would be noise */ }

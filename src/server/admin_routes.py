@@ -175,10 +175,12 @@ def _begin_connect(config: WorldConfig) -> None:
     def _start():
         global _world, _connect_state, _connect_error
         from src.server.persistent_world import PersistentCARLAServer
+        old_world_stopped = False
         try:
             _check_map_exists()
             # Stop previous world if any
             if _world is not None:
+                old_world_stopped = True
                 try:
                     _world.stop()
                 except Exception as e:
@@ -201,7 +203,8 @@ def _begin_connect(config: WorldConfig) -> None:
         except Exception as exc:
             logger.error("Connect to CARLA %s:%s failed: %s", config.host, config.port, exc)
             _connect_error = f"{type(exc).__name__}: {exc}"
-            _connect_state = "error"
+            # nothing was stopped (e.g. unknown map): the old world keeps running, so the state stays "running"; only the message is kept
+            _connect_state = "running" if (not old_world_stopped and _world is not None and _world._running) else "error"
 
     threading.Thread(target=_start, daemon=True, name="admin-connect").start()
 
@@ -213,7 +216,7 @@ class MapRequest(BaseModel):
 @router.get("/maps", summary="Maps the CARLA server can load", dependencies=[Depends(_require_admin)])
 async def list_maps():
     _assert_ready()
-    _assert_running()
+    _assert_stopped_is_conflict()
     maps = await on_sim_thread(_world, _world.list_maps)
     return {"current": _world.get_status().get("map"), "maps": maps}
 
@@ -226,17 +229,20 @@ async def change_map(req: MapRequest):
     if _connect_state == "connecting":                      # before _assert_running: a stopping world is not "running"
         raise HTTPException(status_code=409, detail="A connect is already in progress")
     _assert_ready()
-    _assert_running()
+    _assert_stopped_is_conflict()
     available = await on_sim_thread(_world, _world.list_maps)
     target = _world.match_map(req.map_name, available)
     if target is None:
         raise HTTPException(status_code=422, detail=f"map {req.map_name!r} is not available; available: {', '.join(available)}")
+    current = _world.get_status().get("map")
+    if current and _world.short_map_name(current) == _world.short_map_name(target):
+        return {"ok": True, "changed": False, "message": f"{_world.short_map_name(target)} is already loaded; the world was not restarted"}
     try:
         new_config = WorldConfig.model_validate({**_world.config.model_dump(), "map_name": _world.short_map_name(target)})
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     _begin_connect(new_config)
-    return {"ok": True, "message": f"Loading {target} and restarting the world (async)…"}
+    return {"ok": True, "changed": True, "message": f"Loading {target} and restarting the world (async)…"}
 
 
 @router.get("/sessions", summary="All client sessions", dependencies=[Depends(_require_admin)])
@@ -490,6 +496,12 @@ async def list_links(msg_type: Optional[str] = None, rx_id: Optional[int] = None
 def _assert_ready():
     if _world is None:
         raise HTTPException(status_code=503, detail="Persistent world not initialised")
+
+
+def _assert_stopped_is_conflict():
+    """A stopped world is a valid-but-impossible state for the map routes: 409 (AGENTS.md §5), not 503."""
+    if not _world._running:
+        raise HTTPException(status_code=409, detail="CARLA simulation is not running (stopped); connect first")
 
 
 def _assert_running():
