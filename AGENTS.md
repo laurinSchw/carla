@@ -1,13 +1,14 @@
 # AGENTS.md — CARLA V2X Research Platform
 
 Single entry point for AI agents working in this repo. It replaces `.instructions.md` and
-`docs/agents/*`. Last verified against branch `developer` after the independent review fixes (2026-11-03).
+`docs/agents/*`. Last verified against `main` (= `developer`) on 2026-11-04, after the frontend/hub port, live verification on the lab CARLA and map switching.
 If something here disagrees with the code, the code wins; fix this file.
 
 ## 1. What this is
 A **persistent CARLA 0.9.16 world** runs in a background thread. A **FastAPI server** (port 8000)
 lets clients join (each controls one "leading vehicle"), lets an admin spawn traffic, pedestrians and hazard
-warnings, records runs, and streams telemetry, V2X state and LiDAR. Inside the tick loop an in-process
+warnings, switch the map, records runs, and streams telemetry, V2X state and LiDAR to a browser frontend (a multiplexed WebSocket hub
+with roles and topics, a Three.js LiDAR view, a documented `/api/*`). Inside the tick loop an in-process
 **V2X network** models BSM broadcast over a simplified IEEE 802.11p (DSRC) channel, plus V2I (RSU: MAP/SPAT),
 V2P (VRU awareness) and DENM hazard warnings; every message type goes through the same channel model and leaves
 one `LinkResult` per attempt. Background vehicles are driven by CARLA's Traffic Manager with seeded driver
@@ -33,26 +34,35 @@ shares nothing). Decisions D1–D13 in the handoff (§7) belong to the human; as
 
 ## 3. Layout
 ```
-start_server.py                 CLI entry (argparse → uvicorn). Run from repo root.
+start_server.py                 CLI entry (argparse → uvicorn). Run from repo root. --live needs a host (flag or CARLA_HOST); --fake starts the synthetic world
 src/server/
-  app.py                        FastAPI app; pages / (index), /observer, /vehicle, /admin, /client (redirect to /vehicle),
-                                /static; shuts the world down on exit
-  admin_routes.py               /admin/*: connect (seed, drivers, advisory, map_name, ...), maps + map (switch the CARLA map = restart the world), status (+timing_ms), sessions, traffic,
-                                pedestrians, stop, runs, v2x/{rsus,vrus,spat,links,hazards}   (token: ADMIN_TOKEN)
-  client_routes.py              /client/{blueprints,join,leave,lidar/...}, WS /ws/client/{id}, WS /ws/lidar/{id} (binary v4)
-  persistent_world.py           PersistentCARLAServer: connect, tick thread, spawn/despawn, V2X update every 10 frames,
-                                LiDAR, recording, driver profiles, advisory, hazards
-  session_manager.py, sim_executor.py, route_utils.py, world_config.py (validated WorldConfig)
-src/v2x/                        dsrc_channel.py (DSRCConfig, DSRCChannel, LinkResult), network.py (V2XNetwork: registries,
-                                inboxes, hazards, link log), safety_messages.py (BSM/CAM/DENM, threat level), messages.py
-                                (MAP/SPAT/VRUAM/CPM data), rsu.py
-src/lidar/                      protocol.py (v4 wire format), config.py, manager.py (lifecycle, budget, profiles), carla_backend.py
+  app.py                        FastAPI app; pages / (index), /observer, /vehicle, /admin, /client (redirect to /vehicle), /static, /assets;
+                                no-cache header on pages and scripts; stops the world on exit
+  admin_routes.py               /admin/*: connect (seed, drivers, advisory, map_name, ...), status (+timing_ms, connect_state), maps + map (switch the CARLA map
+                                = restart the world; same map = no-op; unknown map keeps the running world), sessions, traffic, pedestrians, stop, runs,
+                                v2x/{rsus,vrus,spat,links,hazards}   (token: ADMIN_TOKEN)
+  client_routes.py              /client/{blueprints,join,leave,vehicle,lidar/...}, WS /ws/client/{id}, WS /ws/lidar/{id} (binary v4); optional session token
+  hub_routes.py, ws_hub.py      WS /ws (JSON, one connection many topics, latest-wins delivery) and GET topic catalogue; roles.py (observer/vehicle/admin),
+                                topics.py (TOPICS), events.py (event log), published.py (snapshot holder)
+  hub_views.py                  mixin of PersistentCARLAServer: builds world.state / v2x.* / lidar.sensors / run.status on the SIMULATION thread, session grace (D4),
+                                end_session_if_unheld; v2x_publisher.py feeds the V2X frame
+  api_routes.py, api_ops.py     /api/*: status, config (+schema, hot PATCH), v2x/rsus, v2x/denm, map/geometry (ETag), runs (session tokens come from POST /client/join)
+  lidar_routes.py, lidar_ops.py /api/lidar/*; map_geometry.py (road network from map topology); api_docs.py generates docs/api.md + docs/openapi.json
+  persistent_world.py           PersistentCARLAServer: connect, tick thread, spawn/despawn, V2X update every 10 frames, LiDAR, recording, driver profiles,
+                                advisory, hazards, list_maps/_load_map (map switch)
+  session_manager.py, sim_executor.py (on_sim_thread), route_utils.py, world_config.py (validated WorldConfig, HOT_FIELDS, config_schema())
+src/v2x/                        dsrc_channel.py (DSRCConfig, DSRCChannel, LinkResult), network.py (V2XNetwork: registries, inboxes, hazards, link log),
+                                safety_messages.py (BSM/CAM/DENM, threat level), messages.py (MAP/SPAT/VRUAM/CPM data), rsu.py, frame.py (immutable V2XFrame
+                                for the hub), stats.py
+src/lidar/                      protocol.py (v4 wire format), config.py, manager.py (lifecycle, budget, profiles), carla_backend.py, geometry.py, transforms.py
 src/recording/recorder.py       run directory writer + tolerant link reader
 src/traffic/                    drivers.py (seeded profiles → Traffic Manager settings), advisory.py (V2X-assisted slow-down)
-src/visualization/web/          index.html, observer.html, vehicle.html, admin.html (+ static/js ES modules, static/css, static/vendor)
-tests/                          golden/ unit/ v2x/ contract/ integration/ (carla) server/ (server+carla)
-docs/science/                   model.md (what the channel does), recording.md (run formats), CHANGELOG.md (every result-changing
-                                change with numbers), audit.md (superseded)
+src/testing/fake_carla/         synthetic CARLA (city, sim, lidar) for `start_server.py --fake` and the headless runner
+src/scenario.py, src/cli.py     headless scenario runner: `python -m src.cli run scenarios/crossing.yaml`
+src/visualization/web/          index/observer/vehicle/admin .html, static/js ES modules (ws.js, store.js, api.js, map-*.js, lidar-*.js, admin.js, vehicle.js, ...),
+                                static/css, static/vendor (three, uplot; versions in VERSIONS.md). Plain JS, no build step
+tests/                          golden/ unit/ v2x/ contract/ js/ (Node) e2e/ integration/ (carla) server/ (server+carla)
+docs/                           api.md + openapi.json (generated), running.md, science/ (model.md, recording.md, CHANGELOG.md, limitations.md, audit.md superseded)
 ```
 There is no `v2v` package and no `src/config.py`. Tunables live in dataclasses next to their code
 (`DSRCConfig`, `RSUConfig`, `LidarLimits`, `DriverMix`, `AdvisoryConfig`, `WorldConfig`).
@@ -64,9 +74,10 @@ cp .env.example .env            # set ADMIN_TOKEN (compose refuses to start with
 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build frontend    # the sha names recorded runs
 # http://localhost:8000   /admin (token)   /observer, /vehicle (open)    recorded runs appear in ./runs/
 ```
-Local: `python start_server.py [--live --carla-host H --carla-port 2002  (or env CARLA_HOST / CARLA_PORT) --admin-token T --port 8000 --no-v2x --v2x-range 75
+Local: `python start_server.py [--live --carla-host H --carla-port 2002  (or env CARLA_HOST / CARLA_PORT; no built-in host) --admin-token T --port 8000 --no-v2x --v2x-range 75
 --v2x-rate 2 --v2x-penetration 1.0 --seed 42 --no-drivers --v2x-advisory --tm-port 8001]`. Without `--live` only the web UI runs;
-the admin connects CARLA from `/admin` or `POST /admin/connect`. Run from the repo root. The image is Python 3.10.
+the admin page asks for host and port after login (and the map), or use `POST /admin/connect`. `--fake [--fake-vehicles N --fake-pedestrians N --fake-seed N]`
+runs the synthetic world without CARLA. Pages: `/` index, `/observer` and `/vehicle` (open), `/admin` (token). API reference: `docs/api.md`. Run from the repo root. The image is Python 3.10.
 
 ## 5. Invariants — do not break
 - **Fixed timestep** 0.05 s (20 FPS), synchronous mode, substepping `0.05 <= max_substep_delta_time * max_substeps`; `use_hybrid_physics` stays False.
@@ -80,19 +91,26 @@ the admin connects CARLA from `/admin` or `POST /admin/connect`. Run from the re
   `docs/science/model.md` (23 dBm / 33 dBm attributions, DENM cause-code numbers, MAC constants, VRU TX power).
 - **Any change that can alter results** needs a `docs/science/CHANGELOG.md` entry with before/after numbers and a deliberate `UPDATE_GOLDEN=1` run.
 - **Verify any CARLA API call against the live server** (`dir(tm)`): e.g. the TM method is `keep_slow_lane_rule_percentage`, not `keep_right_rule_percentage`.
+- **Hub and API read only published snapshots.** Hub providers never touch CARLA or mutable sim state; everything they serve is built on the simulation thread and
+  published by replacing one reference (`hub_views.py`). Credentials go in the first WS message or the `X-Session-Token` header, never in the URL.
+- **Switching the map restarts the world** (`/admin/map`, `WorldConfig.map_name`): `client.load_world` replaces the server's world, so other users' actors on the shared lab
+  CARLA are destroyed and world settings reset. A wrong name is rejected before anything is stopped. `load_world` itself has not been run against the lab CARLA yet.
+- **`docs/api.md` and `docs/openapi.json` are generated** (`python -m src.server.api_docs`); a test fails when they are stale.
 - **A request that is valid but impossible in the current state is a 409 via `ConflictError` / a dedicated exception**, not a `RuntimeError`
   (`on_sim_thread` maps `RuntimeError` to 503).
 
 ## 6. Tests
 From the repo root: `python -m pytest tests -q -m "not carla"` (venv or container). Markers: `carla` (live CARLA), `server` (deployed server, `SERVER_URL`).
-Baseline: 591 passed, 13 skipped, 5 xfailed (host, with Node); 9 of those passes come from the untracked `tests/test_lidar_enhanced.py`. `docs/api.md`/`openapi.json` are generated: run `python -m src.server.api_docs` after changing routes (a test fails when stale). The 5 strict xfails are stale by
+Baseline: 605 passed, 13 skipped, 5 xfailed, 14 deselected (host venv `.venv`, with Node); 9 of those passes come from the untracked `tests/test_lidar_enhanced.py`. `docs/api.md`/`openapi.json` are generated: run `python -m src.server.api_docs` after changing routes (a test fails when stale). The 5 strict xfails are stale by
 design (CSMA drops at N=100; neighbour tests that never call `broadcast_all`). Node-based tests skip without Node (e.g. in the image).
 - `tests/golden/` — pin `DSRCChannel` (seed 42) and `create_bsm_from_carla` in `expected/*.json`; floats compare at 1e-9 relative. Regenerate only on purpose.
 - `tests/v2x/` — channel, messages, infrastructure/DENM links, model fixes, the channel table pinned against `docs/science/model.md`.
 - `tests/unit/` — LiDAR (protocol, manager, backend queue, geometry vs `carla.Transform`, JS decoder under Node), recorder, drivers/advisory, WorldConfig, and the
   real tick loop against the recording CARLA stub (`test_persistent_world_*.py`).
-- `tests/contract/` — HTTP/WebSocket contract against a `FakeWorld` (no CARLA), including `/admin/connect` → WorldConfig, runs, hazards, LiDAR.
-- Live: `SERVER_URL=http://127.0.0.1:8000 ADMIN_TOKEN=... CARLA_HOST=192.168.0.104 CARLA_PORT=2002 pytest tests/server tests/integration -m carla -s`
+- `tests/contract/` — HTTP/WebSocket contract against a `FakeWorld` (no CARLA), including `/admin/connect` → WorldConfig, runs, hazards, LiDAR, session tokens.
+- `tests/unit/test_hub_views.py`, `test_api_routes.py` — hub topics/roles/grace and `/api/*` + map switching against the real tick loop and the CARLA stub (fixtures `api`, `admin_globals`).
+- `tests/js/` — Node tests of the frontend modules (decoder, map options, stores); runner `tests/unit/test_js_modules.py`. `tests/e2e/` — fake server and headless scenario runs.
+- Live: `SERVER_URL=http://127.0.0.1:8000 ADMIN_TOKEN=... CARLA_HOST=192.168.0.109 CARLA_PORT=2002 pytest tests/server tests/integration -m carla -s`
   (`LIVE_TRAFFIC` / `LIVE_PEDESTRIANS` size the load test; default 25 vehicles + 20 pedestrians).
 - An independent review (Opus 5.5, 2026-11-03) broke 74 behaviours on purpose: the ones no test caught now have tests (`tests/v2x/test_review_survivors.py`, `test_persistent_world_science.py`).
 
@@ -102,7 +120,7 @@ Runs are recorded with `POST /admin/runs` (`docs/science/recording.md`: formats,
 3 m off — **not bit-identical**; average over several seeds. Hazards: `POST /admin/v2x/hazards`; vehicles react only to what they received (`advisory_enabled`).
 
 ## 6b. Live CARLA
-The lab CARLA 0.9.16 PC is `192.168.0.104`, RPC **2002**, streaming 2003 (2000 is taken by something else). **Only one server may be connected to a CARLA world** (two servers both
+The lab CARLA 0.9.16 PC was verified live at `192.168.0.109`, RPC **2002** (earlier notes said `.104`; the address changes, set `CARLA_HOST`), streaming 2003 (2000 is taken by something else). **Only one server may be connected to a CARLA world** (two servers both
 tick it; observed 2x frame rate and timeouts): check the Docker container's `/admin/status` before starting a local server, and stop servers with SIGINT so world settings are restored.
 `GET /admin/status` → `timing_ms` (tick, world_tick, lidar, v2x_update p50/p95/max) and `v2x_phase_ms` show where a tick goes. The lab world is shared: other people's actors and
 sensors appear; live tests count only their own.
@@ -121,7 +139,8 @@ sensors appear; live tests count only their own.
 - Absolute imports from `src`; relative imports inside a subpackage. Type hints on signatures; Pydantic models for REST bodies; `logging.getLogger(__name__)`.
 - Frontend is static HTML + plain JS, no build step.
 - Docstrings cite SAE J2735 / ETSI / IEEE 802.11p sources only when verified.
-- Branches: `developer` is the dev line (tracks `gitlab/developer`; `origin` is a GitHub fork). Commits are authored by the human; do not add AI co-author trailers unless asked.
+- Branches: work on a feature branch → PR on `origin` (GitHub) → merge into `main`; `developer` is kept equal to `main`; the `gitlab` remote (gitlab.dlr.de) gets `developer` and `main`
+  by fast-forward push. Verify every push with `git ls-remote`. Commits are authored by the human; do not add AI co-author trailers unless asked. Do not merge without approval.
   Stage explicit paths (`git add <file>`), never a whole directory: the owner has untracked work files.
 - Before editing, check `REFACTOR_HANDOFF.md` — a file may already be marked DELETE/REPLACE.
 - `docs/V2V_*.md` and `docs/science/audit.md` predate the merge and use old names (`v2v/…`); don't copy their paths.
