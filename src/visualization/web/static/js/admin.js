@@ -90,6 +90,7 @@ async function connectionCard() {
       $('conn-error').textContent = s.connect_error || '';
       if (lastConnectState === 'connecting' && s.connect_state === 'running') location.reload();    // new world: new hub
       lastConnectState = s.connect_state;
+      updateMapForm(s);
       if (!asked && (s.connect_state === 'idle' || s.connect_state === 'error') && !s.running) promptForEndpoint();
     } catch { /* the toast of a failed poll would be noise */ }
   }
@@ -108,6 +109,35 @@ async function connectionCard() {
   $('connect-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     await connectWorld($('cn-host').value, Number($('cn-port').value));
+  });
+  // Map switcher: only while a world runs; the list comes from the CARLA server
+  let mapsLoaded = false;
+  const lastPart = (m) => String(m || '').split('/').pop();
+  async function updateMapForm(s) {
+    const form = $('map-form');
+    form.hidden = !s.running;
+    if (!s.running) { mapsLoaded = false; return; }
+    if (mapsLoaded) return;
+    mapsLoaded = true;
+    try {
+      const r = await api.get('/admin/maps', { quiet: true });
+      const sel = $('cn-map');
+      sel.textContent = '';
+      for (const m of r.maps) { const o = el('option', '', m); o.value = m; sel.appendChild(o); }
+      sel.value = lastPart(r.current);
+    } catch { mapsLoaded = false; }
+  }
+  $('map-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const map = $('cn-map').value;
+    if (!map || !confirm(`Load ${map}? The world restarts: sessions, sensors, spawned traffic and the run end.`)) return;
+    try {
+      await api.post('/admin/map', { map_name: map });
+      toast(`Loading ${map}… the page reloads when the world is up.`, 'info');
+      lastConnectState = 'connecting';
+      mapsLoaded = false;
+    } catch { /* shown */ }
+    refresh();
   });
   // No world yet: ask for the CARLA address (once per page load; "Later" leaves it to the Connection card)
   let asked = false;

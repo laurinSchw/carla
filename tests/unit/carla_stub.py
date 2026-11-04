@@ -227,7 +227,7 @@ class Snapshot:
 
 class _Map:
     def __init__(self, rec):
-        self.name = "Carla/Maps/TestTown"
+        self.name = getattr(rec, "map_name", "Carla/Maps/TestTown")
         self.rec = rec
 
     def get_spawn_points(self):
@@ -341,6 +341,14 @@ class Client:
 
     def get_world(self):
         self.rec.rec("client.get_world")
+        return self.world
+
+    def get_available_maps(self):
+        return ["/Game/Carla/Maps/TestTown", "/Game/Carla/Maps/Town03", "/Game/Carla/Maps/Town10HD_Opt"]
+
+    def load_world(self, name):
+        self.rec.rec("client.load_world", {"name": name})
+        self.rec.map_name = "Carla/Maps/" + name.rstrip("/").split("/")[-1]
         return self.world
 
     def get_trafficmanager(self, port):

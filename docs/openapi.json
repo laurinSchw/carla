@@ -225,6 +225,17 @@
             ],
             "title": "Lidar Max Sensors"
           },
+          "map_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Map Name"
+          },
           "max_substep_delta_time": {
             "anyOf": [
               {
@@ -790,6 +801,22 @@
         "title": "LidarConfig",
         "type": "object"
       },
+      "MapRequest": {
+        "properties": {
+          "map_name": {
+            "description": "e.g. Town03; see GET /admin/maps",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Map Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "map_name"
+        ],
+        "title": "MapRequest",
+        "type": "object"
+      },
       "Mount": {
         "additionalProperties": false,
         "description": "Sensor pose relative to the vehicle (CARLA frame: x forward, y right, z up; degrees).",
@@ -1124,6 +1151,97 @@
           }
         },
         "summary": "Connect to CARLA and start world",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/map": {
+      "post": {
+        "description": "Load another map and restart the world with the same configuration. Sessions, LiDAR sensors, spawned traffic and an\nopen run end, exactly as with ``/connect``. 422 for a map the CARLA server does not have, 409 while a connect runs.",
+        "operationId": "change_map_admin_map_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Switch the CARLA map (restarts the world)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/maps": {
+      "get": {
+        "operationId": "list_maps_admin_maps_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Token",
+            "required": true,
+            "schema": {
+              "title": "X-Admin-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Maps the CARLA server can load",
         "tags": [
           "admin"
         ]

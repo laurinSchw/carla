@@ -97,6 +97,11 @@
       <div class="field"><label for="cn-rsu">RSU limit</label><input id="cn-rsu" type="number" min="0" placeholder="all intersections"><span class="badge badge-restart">restart</span></div>
       <div class="row"><button class="primary" id="connect-btn">Connect</button><button class="danger" id="disconnect-btn" type="button">Disconnect</button></div>
     </form>
+    <form id="map-form" autocomplete="off" hidden>
+      <div class="field"><label for="cn-map">Map</label><select id="cn-map"></select><span></span></div>
+      <div class="row"><button class="primary" id="map-btn">Load map</button></div>
+      <p class="stamp">Loads the map on the CARLA server and restarts the world with the same settings.</p>
+    </form>
     <p id="conn-error" class="state-error"></p>
     <p class="stamp">Connecting (re)starts the world: sessions, sensors and the run end. Settings marked restart only apply here.</p>
   </section>

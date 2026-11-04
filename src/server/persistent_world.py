@@ -222,6 +222,37 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin, LidarOpsMixin):
     # Lifecycle                                                            #
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def match_map(requested: str, available: List[str]) -> Optional[str]:
+        """The entry of ``available`` that ``requested`` names: the full path or just its last part ("Town03")."""
+        want = requested.strip().rstrip("/").split("/")[-1].lower()
+        for m in available:
+            if m.rstrip("/").split("/")[-1].lower() == want:
+                return m
+        return None
+
+    def list_maps(self) -> List[str]:
+        """Names (last path part) of the maps the CARLA server can load. One RPC: call it on the simulation thread."""
+        return sorted(m.rstrip("/").split("/")[-1] for m in self.client.get_available_maps())
+
+    def _load_map(self, requested: str):
+        """Load ``requested`` unless it is the loaded map. Loading takes seconds to a minute, so the RPC timeout is raised for it."""
+        available = list(self.client.get_available_maps())
+        target = self.match_map(requested, available)
+        if target is None:
+            names = ", ".join(sorted(m.rstrip("/").split("/")[-1] for m in available))
+            raise ValueError(f"map {requested!r} is not available on the CARLA server; available: {names}")
+        current = self.client.get_world().get_map().name
+        if current.rstrip("/").split("/")[-1] == target.rstrip("/").split("/")[-1]:
+            return self.client.get_world()
+        logger.info("Loading map %s (was %s)", target, current)
+        self.client.set_timeout(max(self.config.timeout_s, 120.0))
+        try:
+            world = self.client.load_world(target)
+        finally:
+            self.client.set_timeout(self.config.timeout_s)
+        return world
+
     def start(self, paused: bool = False) -> None:
         """Connect to CARLA, apply settings, start the simulation thread. ``paused``: the thread runs submitted work but
         does not tick until ``resume()`` (headless scenarios set up and start recording before the first tick)."""
@@ -232,6 +263,8 @@ class PersistentCARLAServer(HubViewsMixin, ApiOpsMixin, LidarOpsMixin):
         self.client = carla.Client(self.host, self.port)
         self.client.set_timeout(cfg.timeout_s)
         self.world = self.client.get_world()
+        if cfg.map_name:
+            self.world = self._load_map(cfg.map_name)
         self._map_name = self.world.get_map().name
 
         logger.info("Connected to map: %s", self._map_name)

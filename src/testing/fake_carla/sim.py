@@ -699,6 +699,14 @@ class Client:
     def get_world(self) -> World:
         return self._world
 
+    def get_available_maps(self) -> List[str]:
+        return ["/Game/Carla/Maps/FakeTown"]
+
+    def load_world(self, name: str) -> World:
+        if name.rstrip("/").split("/")[-1] != "FakeTown":
+            raise RuntimeError("the fake world has a single map (FakeTown)")
+        return self._world
+
     def get_trafficmanager(self, port: int = 8000) -> TrafficManager:
         return TrafficManager(self._world, port)
 

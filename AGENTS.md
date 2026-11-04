@@ -37,7 +37,7 @@ start_server.py                 CLI entry (argparse → uvicorn). Run from repo 
 src/server/
   app.py                        FastAPI app; pages / (index), /observer, /vehicle, /admin, /client (redirect to /vehicle),
                                 /static; shuts the world down on exit
-  admin_routes.py               /admin/*: connect (seed, drivers, advisory, ...), status (+timing_ms), sessions, traffic,
+  admin_routes.py               /admin/*: connect (seed, drivers, advisory, map_name, ...), maps + map (switch the CARLA map = restart the world), status (+timing_ms), sessions, traffic,
                                 pedestrians, stop, runs, v2x/{rsus,vrus,spat,links,hazards}   (token: ADMIN_TOKEN)
   client_routes.py              /client/{blueprints,join,leave,lidar/...}, WS /ws/client/{id}, WS /ws/lidar/{id} (binary v4)
   persistent_world.py           PersistentCARLAServer: connect, tick thread, spawn/despawn, V2X update every 10 frames,
