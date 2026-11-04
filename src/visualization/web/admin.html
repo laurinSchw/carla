@@ -76,6 +76,16 @@
 </main>
 
 <section class="layout" style="grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); align-items: start;" aria-label="Administration">
+  <dialog id="connect-dialog" aria-labelledby="cd-h" style="border:1px solid var(--border, #888); border-radius:8px; padding:1.2rem; max-width:26rem; width:90%">
+    <form method="dialog" id="connect-dialog-form" autocomplete="off">
+      <h2 id="cd-h" style="margin-top:0">Connect to CARLA</h2>
+      <p>No world is running. Enter the address of the CARLA server.</p>
+      <div class="field"><label for="cd-host">CARLA host (IP)</label><input id="cd-host" required placeholder="e.g. 192.168.0.109"><span></span></div>
+      <div class="field"><label for="cd-port">CARLA port</label><input id="cd-port" type="number" min="1" max="65535" required value="2000"><span></span></div>
+      <p id="cd-error" class="state-error"></p>
+      <div class="row"><button class="primary" id="cd-connect" value="connect">Connect</button><button type="button" id="cd-skip">Later</button></div>
+    </form>
+  </dialog>
   <section class="panel" id="card-connection" aria-labelledby="c-conn-h">
     <header><h2 id="c-conn-h">Connection</h2><span class="badge" id="conn-state">unknown</span></header>
     <form id="connect-form" autocomplete="off">

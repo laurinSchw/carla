@@ -1,6 +1,6 @@
 # Docker Deployment Guide
 
-This guide explains how to run the CARLA V2V Research Platform frontend using Docker.
+This guide explains how to run the CARLA V2X Research Platform frontend using Docker.
 
 ## Quick Start
 
@@ -21,21 +21,21 @@ docker-compose down
 
 ```bash
 # Build the image
-docker build -t carla-v2v-frontend .
+docker build -t carla-v2x-frontend .
 
 # Run the container
 docker run -d \
-  --name carla-v2v-frontend \
+  --name carla-v2x-frontend \
   -p 8000:8000 \
   -v $(pwd)/logs:/app/logs \
   -v $(pwd)/data:/app/data \
-  carla-v2v-frontend
+  carla-v2x-frontend
 
 # View logs
-docker logs -f carla-v2v-frontend
+docker logs -f carla-v2x-frontend
 
 # Stop and remove
-docker stop carla-v2v-frontend && docker rm carla-v2v-frontend
+docker stop carla-v2x-frontend && docker rm carla-v2x-frontend
 ```
 
 ## Accessing the Frontend
