@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {
   LINK_STYLES, linkOutcome, linkOpacity, rowsToObjects, stationGlyph, ageClass, hitTestStations, distToSegment,
   hitTestLinks, Trails, Perspective, geometryBounds,
-} from '../../src/web/static/js/map-model.js';
-import { createViewport } from '../../src/web/static/js/coords.js';
+} from '../../src/visualization/web/static/js/map-model.js';
+import { createViewport } from '../../src/visualization/web/static/js/coords.js';
 
 test('every link outcome has a distinct dash pattern (not colour only) and a distinct colour token', () => {
   const dashes = Object.values(LINK_STYLES).map((s) => s.dash.join(','));

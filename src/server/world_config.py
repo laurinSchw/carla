@@ -69,6 +69,9 @@ class WorldConfig(BaseModel):
     session_disconnect_grace_s: float = Field(default=30.0, ge=0.0)
     # Observers (no token) may use the read-only pages and topics (decision D12)
     observer_public: bool = True
+    # The old /client/{leave,vehicle,lidar}/{session_id} routes and /ws/client/{id} accept the session id alone (False) or also
+    # need the session's X-Session-Token / the admin token (True). Off by default so existing scripts keep working.
+    client_routes_require_token: bool = False
     # Rate at which ground-truth station states are published (whole number of frames, like the V2X rate)
     world_state_rate_hz: float = Field(default=10.0, gt=0)
     # Row cap of one v2x.links message; more rows are cut and the message says truncated
@@ -184,6 +187,7 @@ HOT_FIELDS: Dict[str, str] = {
     "advisory_hold_s": "next V2X update",
     "session_disconnect_grace_s": "immediately",
     "observer_public": "immediately",
+    "client_routes_require_token": "immediately",
     "world_state_rate_hz": "immediately",
     "v2x_links_max_rows": "immediately",
     "lidar_max_sensors": "for new requests (running sensors keep running)",

@@ -24,7 +24,8 @@ Driven by `REFACTOR_HANDOFF.md` (rev 2: plan, defect list S1–S20 / C1–C13 / 
 | 4 LiDAR on request (`src/lidar/`) | done and live-verified. Tick p95 with 3 sessions + 70 actors was 79.6 ms (target 50 ms, not met: CARLA's `world.tick()` dominates on the lab PC) |
 | 7 Recording (`src/recording/`, `POST /admin/runs`) | done in a first version (see `docs/science/recording.md`); frame-scheduled commands / bit-identical repeats are not |
 | Background drivers + V2X advisory (`src/traffic/`) | done; effect size of the advisory not measured |
-| 5 WS hub + roles, 6 new frontend, 8 docs | not started (only the stopgap admin / client pages exist) |
+| 5 WS hub + roles (`/ws`, topics, session tokens, grace D4), 6 new frontend (`/`, `/observer`, `/vehicle`, `/admin`, Three.js LiDAR view), `/api/*` + `/api/lidar/*` routes, `docs/api.md` | ported from the archived branch (tag `archive/refactor-handoff`); live-verified 2026-11-04 on CARLA 0.9.16 (Town10HD_Opt, 15 vehicles + 1 client): 14 live tests pass; map geometry (168 lanes, 9 junctions), RSUs, DENM, run start/stop, hub topics (world.state, v2x.frame/stats, lidar.sensors, events, run.status) and a v4 LiDAR stream (≈520 kB/frame) work. Tick p95 70.5 ms (CARLA `world.tick()` 66 ms) |
+| Fake CARLA (`start_server.py --fake`), headless scenarios (`python -m src.cli run scenarios/crossing.yaml`), JS Node tests (`tests/js`, runner `tests/unit/test_js_modules.py`) | done; same-seed determinism is shown on the fake world only (`docs/science/CHANGELOG.md`) |
 
 Open model items (need decision D5 or a reference dataset): i.i.d. shadowing (S5), the MAC term is a placeholder (S6), no building
 occlusion (S20), CPM generation, ETSI CAM triggering rules, cooperative perception (`enable_bidirectional_sharing` is a stub that
@@ -34,20 +35,21 @@ shares nothing). Decisions D1–D13 in the handoff (§7) belong to the human; as
 ```
 start_server.py                 CLI entry (argparse → uvicorn). Run from repo root.
 src/server/
-  app.py                        FastAPI app; /, /admin, /client, /static; shuts the world down on exit
+  app.py                        FastAPI app; pages / (index), /observer, /vehicle, /admin, /client (redirect to /vehicle),
+                                /static; shuts the world down on exit
   admin_routes.py               /admin/*: connect (seed, drivers, advisory, ...), status (+timing_ms), sessions, traffic,
                                 pedestrians, stop, runs, v2x/{rsus,vrus,spat,links,hazards}   (token: ADMIN_TOKEN)
-  client_routes.py              /client/{blueprints,join,leave,lidar/...}, WS /ws/client/{id}, WS /ws/lidar/{id} (binary v3)
+  client_routes.py              /client/{blueprints,join,leave,lidar/...}, WS /ws/client/{id}, WS /ws/lidar/{id} (binary v4)
   persistent_world.py           PersistentCARLAServer: connect, tick thread, spawn/despawn, V2X update every 10 frames,
                                 LiDAR, recording, driver profiles, advisory, hazards
   session_manager.py, sim_executor.py, route_utils.py, world_config.py (validated WorldConfig)
 src/v2x/                        dsrc_channel.py (DSRCConfig, DSRCChannel, LinkResult), network.py (V2XNetwork: registries,
                                 inboxes, hazards, link log), safety_messages.py (BSM/CAM/DENM, threat level), messages.py
                                 (MAP/SPAT/VRUAM/CPM data), rsu.py
-src/lidar/                      protocol.py (v3 wire format), config.py, manager.py (lifecycle, budget, profiles), carla_backend.py
+src/lidar/                      protocol.py (v4 wire format), config.py, manager.py (lifecycle, budget, profiles), carla_backend.py
 src/recording/recorder.py       run directory writer + tolerant link reader
 src/traffic/                    drivers.py (seeded profiles → Traffic Manager settings), advisory.py (V2X-assisted slow-down)
-src/visualization/web/          admin_panel.html, client_join.html (+ static/js lidar-decoder.js, lidar-view.js; canvas, no Three.js)
+src/visualization/web/          index.html, observer.html, vehicle.html, admin.html (+ static/js ES modules, static/css, static/vendor)
 tests/                          golden/ unit/ v2x/ contract/ integration/ (carla) server/ (server+carla)
 docs/science/                   model.md (what the channel does), recording.md (run formats), CHANGELOG.md (every result-changing
                                 change with numbers), audit.md (superseded)
@@ -60,9 +62,9 @@ Docker is the normal way to run this.
 ```bash
 cp .env.example .env            # set ADMIN_TOKEN (compose refuses to start without it)
 GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build frontend    # the sha names recorded runs
-# http://localhost:8000   /admin (token)   /client (open)    recorded runs appear in ./runs/
+# http://localhost:8000   /admin (token)   /observer, /vehicle (open)    recorded runs appear in ./runs/
 ```
-Local: `python start_server.py [--live --carla-host H --carla-port 2002 --admin-token T --port 8000 --no-v2x --v2x-range 75
+Local: `python start_server.py [--live --carla-host H --carla-port 2002  (or env CARLA_HOST / CARLA_PORT) --admin-token T --port 8000 --no-v2x --v2x-range 75
 --v2x-rate 2 --v2x-penetration 1.0 --seed 42 --no-drivers --v2x-advisory --tm-port 8001]`. Without `--live` only the web UI runs;
 the admin connects CARLA from `/admin` or `POST /admin/connect`. Run from the repo root. The image is Python 3.10.
 
@@ -83,8 +85,8 @@ the admin connects CARLA from `/admin` or `POST /admin/connect`. Run from the re
 
 ## 6. Tests
 From the repo root: `python -m pytest tests -q -m "not carla"` (venv or container). Markers: `carla` (live CARLA), `server` (deployed server, `SERVER_URL`).
-Baseline: 487 passed, 11 skipped, 5 xfailed (host); 9 of those passes come from the untracked `tests/test_lidar_enhanced.py`. The 5 strict xfails are stale by
-design (CSMA drops at N=100; neighbour tests that never call `broadcast_all`). Node-based tests (`test_lidar_js_decoder.py`, `test_lidar_view_js.py`) skip without Node (e.g. in the image).
+Baseline: 591 passed, 13 skipped, 5 xfailed (host, with Node); 9 of those passes come from the untracked `tests/test_lidar_enhanced.py`. `docs/api.md`/`openapi.json` are generated: run `python -m src.server.api_docs` after changing routes (a test fails when stale). The 5 strict xfails are stale by
+design (CSMA drops at N=100; neighbour tests that never call `broadcast_all`). Node-based tests skip without Node (e.g. in the image).
 - `tests/golden/` — pin `DSRCChannel` (seed 42) and `create_bsm_from_carla` in `expected/*.json`; floats compare at 1e-9 relative. Regenerate only on purpose.
 - `tests/v2x/` — channel, messages, infrastructure/DENM links, model fixes, the channel table pinned against `docs/science/model.md`.
 - `tests/unit/` — LiDAR (protocol, manager, backend queue, geometry vs `carla.Transform`, JS decoder under Node), recorder, drivers/advisory, WorldConfig, and the
@@ -110,7 +112,8 @@ sensors appear; live tests count only their own.
 - V2X-aware driver: the mechanism is verified live; its effect on speeds/collisions is not measured (needs same-seed A/B over several seeds).
 - Drivers: profiles are project defaults, not calibrated; no destination-driven routing (`set_route` / `set_path` exist in the live TM but need a route planner).
 - Recording: gzip links grow with the square of the V2X stations (≈ 6 MB/minute at 25 vehicles + 5 RSUs); runs are owned by root when written by the container.
-- LiDAR: viewer is a 2-D canvas (no Three.js); observer/admin LiDAR pages of Phase 6 do not exist.
+- LiDAR wire format is v4 since 2026-11-03; raw LiDAR recorded earlier is v3 (other bit layout) and is rejected by the readers, there is no v3 reader.
+- Hub and `/ws/client` both end a session at once at grace 0 when its last connection closes (`end_session_if_unheld`). CARLA host/port come from `--carla-host/--carla-port` or `CARLA_HOST/CARLA_PORT` (no built-in host). `/client/*` routes accept the session id alone by default; `client_routes_require_token` (hot, `PATCH /api/config`) makes them need `X-Session-Token` or the admin token (the `/ws/lidar/{session_id}` legacy socket is not covered). Open decision: which sensors a vehicle may view with `observer_public=false` (now: its own only).
 - Untracked work files of the owner (hidden from `git add <dir>` by `.git/info/exclude`; never commit them without asking): `collector_enhanced.py` (depends on the removed
   collector), `tests/test_lidar_enhanced.py` (tests its own mocks), root stress/accuracy scripts, `STRESS_*`/`LIDAR_*` summaries, `docs/LIDAR_SERVER_IMPLEMENTATION.md` (old LiDAR design).
 

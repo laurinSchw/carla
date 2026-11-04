@@ -34,7 +34,8 @@ export class LidarView {
    * @param {number} [o.maxPoints]
    */
   constructor(container, { sensorId, schema, getOverlays = () => ({}), simRateHz = 20, onState = () => {}, onClose = () => {},
-    canShowTruth = false, maxPoints = MAX_POINTS, highlightId = null } = {}) {
+    canShowTruth = false, maxPoints = MAX_POINTS, highlightId = null, credentials = () => null } = {}) {
+    this.credentials = credentials;
     this.container = container;
     this.sensorId = sensorId;
     this.schema = schema;
@@ -195,6 +196,7 @@ export class LidarView {
   _startStream() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     this.stream = new LidarStream(`${proto}://${location.host}/ws/lidar/${this.sensorId}`, {
+      credentials: this.credentials,
       onFrame: (buf) => this._onRawFrame(buf),
       onMessage: (m) => this._onMessage(m),
       onStatus: (s) => { if (s !== 'open') this._setState(s); },
@@ -438,7 +440,7 @@ export class LidarView {
     d.frozen = String(this.frozen);
   }
 
-  /** Raw v3 bytes as received plus the V2X frame used for the overlays (labelled with its stream profile). */
+  /** Raw v4 bytes as received plus the V2X frame used for the overlays (labelled with its stream profile). */
   exportFrame() {
     if (!this.lastRaw || !this.latest) return null;
     const F = this.latest.header.frame;
@@ -451,7 +453,7 @@ export class LidarView {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
-    dl(new Blob([this.lastRaw], { type: 'application/octet-stream' }), `lidar_sensor${this.sensorId}_frame_${F}.v3.bin`);
+    dl(new Blob([this.lastRaw], { type: 'application/octet-stream' }), `lidar_sensor${this.sensorId}_frame_${F}.v4.bin`);
     const meta = { lidar_frame: F, v2x_frame_used_for_overlays: this.overlaySnapshot ? this.overlaySnapshot.v2xFrame : null,
       stream_profile: this.streamProfile, note: 'Subsampled for display if stream_profile.subsampled; full resolution comes only from recordings.',
       overlays: this.overlaySnapshot || null };

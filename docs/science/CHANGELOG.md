@@ -396,3 +396,28 @@ links of the previous update were stamped with a new frame when the V2X update f
 - The statement that the "ETSI EN 302 663 Class A" attribution was removed was not true for `V2XNetwork`'s docstring or the "faithfully represents" claim in `dsrc_channel.py`; both are now corrected.
 - AGENTS.md still listed S2/S7/S9 as unverified live, recording as not started, `latitude/longitude` BSM fields and 299 tests; rewritten.
 - The "Monte Carlo" check of the model.md table now goes through the production `evaluate_link` (the table test alone re-implemented the formula); `_compute_prr` and `evaluate_link` now share one `_p_channel`.
+
+## Port from the archived branch: fake world, headless scenarios, JS fixture tests (2026-11-03, branch `feature/port-frontend-hub`)
+No change to the V2X channel, BSM, threat or driver models (golden files unchanged, no `UPDATE_GOLDEN`).
+
+- **LiDAR wire format (data-format change, same version 3):** the field-mask bits are now the web UI decoder's
+  (`static/js/lidar-decoder.js`): `xyz=1, tag_u8=2, tag_u32=4, object_idx=8, intensity=16, cos_inc=32`. Before:
+  `tag=2, object_idx=4, intensity=8, cos_inc=16`. Semantic mask 23 → 43, raycast mask 9 → 17; strides unchanged (21 / 16 bytes),
+  header and pose unchanged. The removed legacy canvas decoder was the only consumer of the old bits. **Raw LiDAR recorded earlier uses
+  the old bits**; an old raycast frame (mask 9) would decode with the new reader as xyz + object_idx and silently misread intensity as ids.
+  New runs that record LiDAR write `manifest.lidar_protocol = {"version": 4, "field_layout": "xyz=1,tag_u8=2,..."}`; an old run has no such key.
+- **Pure-numpy pose transform** `src/lidar/transforms.py` (= `carla.Transform.get_matrix()`; checked against the installed carla module for
+  5 poses incl. pitch 90 / roll 90, max deviation < 1e-6). Used by the fake world and the JS fixtures; the server still uses CARLA's own matrix.
+- **`WorldConfig.realtime` is honoured** (it existed but the loop always slept to real time). Default `True`: unchanged behaviour.
+  `manifest.reproducibility.realtime_pacing` now reports the setting instead of a constant `true`.
+- **Frame-scheduled commands:** `PersistentCARLAServer.start(paused=True)`, `resume()`, `tick_index`, `at_tick(i, fn)`; used by
+  `src/scenario.py` / `python -m src.cli run`. Measured on the fake world (`scenarios/crossing.yaml`, seed 7, 12 vehicles, 4 pedestrians,
+  400 ticks, DENM + LiDAR + RSU off + awareness change): two runs → identical sha256 of `v2x_links.jsonl.gz` (15 480 link records),
+  `stations.jsonl`, `lidar_meta.jsonl` and all 239 raw LiDAR frames; seed 8 → all of them differ. 400 ticks took 1.35 s. Not measured on CARLA.
+- **Run manifests say `fake_carla: true|false`.** The fake world (`src/testing/fake_carla`, `start_server.py --fake`) is a test double;
+  its numbers are not results.
+- `/api/runs` no longer reports an OS permission error (e.g. `runs/` owned by root) as `409 restart_required`; it is `503 {"error": "storage"}`.
+
+## LiDAR wire format v4 (2026-11-03, no model change)
+The field-mask bits changed to the web UI's layout, so the protocol version is now **4** (it was briefly "v3" with the new bits). Raw LiDAR
+recorded before this date is v3 with the old layout and is rejected by the v4 readers (Python and JS) rather than misread. No V2X or channel numbers change.

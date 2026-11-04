@@ -19,6 +19,8 @@ from src.server.session_manager import SessionManager
 _PT = np.dtype([("x", "f4"), ("y", "f4"), ("z", "f4"), ("cos_inc", "f4"), ("object_idx", "u4"), ("tag", "u4")])
 
 
+from src.server.hub_views import HubViewsMixin  # noqa: E402
+
 class FakeLidarHandle:
     def __init__(self, config):
         self.config = config
@@ -39,6 +41,9 @@ class FakeLidarBackend:
 
 
 class FakeWorld:
+    session_disconnect_grace_s = 0.0
+    end_session_if_unheld = HubViewsMixin.end_session_if_unheld   # the real rule, not a copy
+
     def __init__(self, running: bool = True, spawn_ok: bool = True):
         self.sessions = SessionManager()
         self._running = running

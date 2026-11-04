@@ -6,7 +6,7 @@
         stations.jsonl     one line per V2X update: ground truth of every vehicle / RSU / VRU
         v2x_links.jsonl    one line per transmission attempt: the full LinkResult (channel decision)
         lidar_meta.jsonl   (optional) one line per recorded LiDAR frame
-        lidar/<sensor>/<frame>.bin   (optional) protocol-v3 frames at FULL resolution (never subsampled)
+        lidar/<sensor>/<frame>.bin   (optional) protocol-v4 frames at FULL resolution (never subsampled)
 
 ``v2x_links.jsonl.gz`` is gzip-compressed and COLUMNAR (the first live recording of 25 vehicles was 28 MB in 30 s as one
 JSON object per link): each line is ``{"frame", "sim_time", "rows": [[...], ...]}`` and the column names are in
@@ -41,6 +41,9 @@ class RunAlreadyRecording(Exception):
 
 
 logger = logging.getLogger(__name__)
+
+#: what a run records unless asked otherwise (names the admin page offers; "messages" is accepted and ignored: not recorded)
+DEFAULT_RECORD = ("links", "stations", "messages", "lidar_meta")
 
 FILES = ("events.jsonl", "stations.jsonl", "v2x_links.jsonl")
 LINKS_FILE = "v2x_links.jsonl.gz"  # logical name "v2x_links.jsonl" in row_counts
@@ -105,6 +108,7 @@ class RunRecorder:
         self.record_lidar = record_lidar
         self.counts: Dict[str, int] = {f: 0 for f in FILES}
         self.counts["lidar_frames"] = 0
+        self.counts["links_written"] = 0
         try:
             # gzip header: no file name, mtime 0 -> the compressed bytes depend only on the data (reproducible runs)
             self._links_raw = open(self.path / LINKS_FILE, "wb")
@@ -123,6 +127,8 @@ class RunRecorder:
             "started_utc": started.isoformat(), "started_wall_time_unix": wall_clock(),
             "start_frame": start_frame, "start_sim_time": start_sim_time,
             "record_links": record_links, "record_lidar": record_lidar,
+            **({"lidar_protocol": {"version": protocol.VERSION, "field_layout": protocol.FIELD_LAYOUT_ID}}
+               if record_lidar else {}),
             **manifest,
         }
         self._write_manifest(final=False)
@@ -151,6 +157,8 @@ class RunRecorder:
         cols = self._link_columns or []
         rows = [[_clean(getattr(l, c) if is_dataclass(l) else l[c]) for c in cols] for l in links]
         self._line("v2x_links.jsonl", {"frame": frame, "sim_time": sim_time, "rows": rows})
+        if self.write_error is None:
+            self.counts["links_written"] += len(rows)
 
     def lidar_frame(self, info: dict, lf: Any) -> None:
         """Raw-listener hook for ``LidarManager``: the frame is written exactly as delivered (full resolution)."""
@@ -178,7 +186,8 @@ class RunRecorder:
             if close_errors and self.write_error is None:
                 self.write_error = "; ".join(close_errors)
             self._manifest.update({"end_frame": frame, "end_sim_time": sim_time, "ended_wall_time_unix": self._wall(),
-                                   "row_counts": dict(self.counts), "complete": self.write_error is None})
+                                   "row_counts": dict(self.counts), "complete": self.write_error is None,
+                                   "status": "finished" if self.write_error is None else "failed"})
             if self.write_error is not None:
                 self._manifest["write_error"] = self.write_error  # the files are incomplete or damaged: say so
             self._write_manifest(final=True)
@@ -195,6 +204,25 @@ class RunRecorder:
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{type(exc).__name__}: {exc}")
         return errors
+
+    def status(self) -> dict:
+        """Live numbers of the active run for the admin page (``GET /api/runs``). The writer is synchronous (no queue), so the
+        queue fields are 0."""
+        import shutil
+        written = 0
+        for p in self.path.iterdir():
+            try:
+                written += p.stat().st_size
+            except OSError:
+                pass
+        try:
+            free = shutil.disk_usage(self.path).free
+        except OSError:
+            free = None
+        return {"run_id": self.run_id, "v2x_updates": self.counts["stations.jsonl"], "links_written": self.counts["links_written"],
+                "lidar_frames": self.counts["lidar_frames"], "bytes_written": written, "queue_fill": 0.0, "queue_max": 0,
+                "disk_free_bytes": free, "error": self.write_error, "record_links": self.record_links,
+                "record_lidar": self.record_lidar}
 
     def summary(self) -> dict:
         return {"run_id": self.run_id, "path": str(self.path), "row_counts": dict(self.counts),
@@ -235,7 +263,10 @@ def list_runs(root: Path) -> List[dict]:
             m = json.loads(d.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        out.append({k: m.get(k) for k in ("run_id", "name", "started_utc", "start_frame", "end_frame", "complete", "row_counts")})
+        row = {k: m.get(k) for k in ("run_id", "name", "started_utc", "start_frame", "end_frame", "complete", "row_counts")}
+        row["status"] = m.get("status") or ("finished" if m.get("complete") else "incomplete")
+        row["frames"] = None if m.get("end_frame") is None else m["end_frame"] - (m.get("start_frame") or 0)
+        out.append(row)
     return out
 
 

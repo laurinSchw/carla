@@ -12,12 +12,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 import src.server.admin_routes as _admin_mod
 import src.server.client_routes as _client_mod
+import src.server.api_routes as _api_mod
 import src.server.hub_routes as _hub_mod
+import src.server.lidar_routes as _lidar_mod
 
 WEB_DIR = Path(__file__).parent.parent / "visualization" / "web"
 
@@ -48,6 +50,8 @@ async def _validation_error(_request: Request, exc: RequestValidationError):
 app.include_router(_admin_mod.router)
 app.include_router(_client_mod.router)
 app.include_router(_hub_mod.router)
+app.include_router(_api_mod.router)
+app.include_router(_lidar_mod.router)
 
 if (WEB_DIR / "static").exists():
     app.mount("/static", StaticFiles(directory=str(WEB_DIR / "static")), name="static")
@@ -60,38 +64,46 @@ def set_persistent_world(world) -> None:
     _admin_mod.set_persistent_world(world)
     _client_mod.set_persistent_world(world)
     _hub_mod.set_persistent_world(world)
+    _api_mod.set_persistent_world(world)
+    _lidar_mod.set_persistent_world(world)
 
 
 # /admin/connect creates a world after startup and propagates it through this module.
 _admin_mod.set_server_module(sys.modules[__name__])
 
 
-def _page(name: str, missing: str) -> HTMLResponse:
+def _page(name: str) -> HTMLResponse:
     page = WEB_DIR / name
     if page.exists():
         return HTMLResponse(content=page.read_text())
-    return HTMLResponse(content=f"<h1>{missing} not found</h1>", status_code=404)
+    return HTMLResponse(content=f"<h1>{name} not found</h1>", status_code=404)
 
 
 @app.get("/", include_in_schema=False)
 async def root():
     # Docker healthcheck requests "/" and expects 200.
-    return HTMLResponse(
-        "<!doctype html><title>CARLA V2X + LiDAR Server</title>"
-        "<h1>CARLA V2X + LiDAR Server</h1>"
-        "<ul><li><a href='/admin'>Admin panel</a> (token required)</li>"
-        "<li><a href='/client'>Join as a vehicle</a></li></ul>"
-    )
+    return _page("index.html")
+
+
+@app.get("/observer", include_in_schema=False)
+async def observer_page():
+    return _page("observer.html")
+
+
+@app.get("/vehicle", include_in_schema=False)
+async def vehicle_page():
+    return _page("vehicle.html")
 
 
 @app.get("/admin", include_in_schema=False)
 async def admin_panel():
-    return _page("admin_panel.html", "Admin panel")
+    return _page("admin.html")
 
 
 @app.get("/client", include_in_schema=False)
 async def client_join():
-    return _page("client_join.html", "Client join page")
+    # the old join page is gone; keep the URL working for devices that have it bookmarked
+    return RedirectResponse("/vehicle")
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8000):

@@ -171,7 +171,7 @@ def lidar_schema(limits: Optional[Dict[str, Any]] = None) -> dict:
         return [a for a in common + mount + raycast_only if t in a["sensor_types"]]
 
     return {
-        "protocol_version": 3,
+        "protocol_version": 4,
         "sensor_types": {
             SENSOR_SEMANTIC: {"label": "Semantic LiDAR", "blueprint": BLUEPRINT_IDS[SENSOR_SEMANTIC],
                               "attributes": for_type(SENSOR_SEMANTIC), "point_fields": ["tag", "object_idx", "cos_inc"]},

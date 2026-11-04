@@ -181,7 +181,7 @@ export function initObserver(app, { role = 'observer' } = {}) {
     const sim = store.get('run.status');
     const rate = sim ? 1 / sim.data.fixed_delta_seconds : config.fixed_delta_seconds ? 1 / config.fixed_delta_seconds : 20;
     const view = new LidarView(box, {
-      sensorId: sensor.sensor_id, schema: lidarSchema, simRateHz: rate, canShowTruth: true,
+      sensorId: sensor.sensor_id, schema: lidarSchema, simRateHz: rate, canShowTruth: true, credentials: app.wsCredentials,
       getOverlays: (frame) => {
         const s = (store.get('lidar.sensors') || { data: { sensors: [] } }).data.sensors.find((x) => x.sensor_id === sensor.sensor_id) || sensor;
         view.setSensorInfo(s);

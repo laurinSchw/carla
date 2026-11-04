@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   messageAge, inboxRows, DeliveryTracker, SentCounter, spatCountdown, LinkLogBuffer, prrSeries, marginBars, TimeSeries,
-} from '../../src/web/static/js/panels-model.js';
+} from '../../src/visualization/web/static/js/panels-model.js';
 
 test('message age comes from the message time stamp, null when it has none', () => {
   assert.equal(messageAge({ timestamp: 4.5 }, 5), 0.5);

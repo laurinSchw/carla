@@ -45,20 +45,19 @@ export function createApp({ role = 'observer' } = {}) {
     onError: (e) => toastError(e.message),
   });
   const store = new Store();
-  const hub = new HubSocket(wsUrl('/ws'), {
-    credentials: () => {
-      if (role === 'admin' && credentials.adminToken) return { admin_token: credentials.adminToken };
-      if (role === 'vehicle' && credentials.session) return { session_token: credentials.session.token };
-      return null;
-    },
-  });
+  const wsCredentials = () => {
+    if (role === 'admin' && credentials.adminToken) return { admin_token: credentials.adminToken };
+    if (role === 'vehicle' && credentials.session) return { session_token: credentials.session.token };
+    return null;
+  };
+  const hub = new HubSocket(wsUrl('/ws'), { credentials: wsCredentials });
   hub.onState = (state, detail) => store.setConnection(state, detail);
   hub.onError = (m) => {
     store.lastError = m;
     toastError(`${m.code}: ${m.message}`);
   };
   const app = {
-    role, api, store, hub,
+    role, api, store, hub, wsCredentials,
     /** Subscribe a topic and feed every envelope into the store. */
     watch(topic, opts = {}, extra) {
       hub.subscribe(topic, opts, (data, env, gap) => {

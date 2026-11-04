@@ -27,8 +27,8 @@ services:
       # recorded runs (manifest, events, stations, V2X links, optional LiDAR): keep them outside the container
       - ./runs:/app/runs
     environment:
-      - CARLA_HOST=192.168.1.101
-      - CARLA_PORT=2000
+      - CARLA_HOST=${CARLA_HOST:-}
+      - CARLA_PORT=${CARLA_PORT:-2000}
       - ADMIN_TOKEN=${ADMIN_TOKEN:?set ADMIN_TOKEN in .env (see .env.example)}
     restart: unless-stopped
     healthcheck:

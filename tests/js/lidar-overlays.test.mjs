@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Store } from '../../src/web/static/js/store.js';
-import { receivedFromInbox, buildOverlays } from '../../src/web/static/js/lidar-overlays.js';
+import { Store } from '../../src/visualization/web/static/js/store.js';
+import { receivedFromInbox, buildOverlays } from '../../src/visualization/web/static/js/lidar-overlays.js';
 
 const bsm = (id, x, y, ts) => ({ tx_id: id, msg_type: 'BSM', message: { x_m: x, y_m: y, z_m: 0, heading: 90, timestamp: ts, vehicle_length: 4.5, vehicle_width: 1.8, vehicle_height: 1.5 }, link: {} });
 const inbox = (frame, simTime, messages, stationId = 7) => ({ topic: 'v2x.inbox', seq: frame, frame, sim_time: simTime, data: { station_id: stationId, messages } });

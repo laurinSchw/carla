@@ -181,7 +181,7 @@ function openView(sensor) {
   lidarForm.setConfig(sensor.config);
   $('lidar-off').hidden = true;
   view = new LidarView($('lidar-view'), {
-    sensorId: sensor.sensor_id, schema, simRateHz: rate, canShowTruth: false,
+    sensorId: sensor.sensor_id, schema, simRateHz: rate, canShowTruth: false, credentials: app.wsCredentials,
     getOverlays: (frame) => buildOverlays({ store, stationId: session.actor_id, lidarFrame: frame,
       lidarSimTime: view && view.latest ? view.latest.header.simTime : 0, world: null, includeTruth: false, ego: me, awareness: config.awareness_range_m }),
     onClose: () => { view = null; $('lidar-view').textContent = ''; },

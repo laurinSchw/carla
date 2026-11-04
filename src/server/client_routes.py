@@ -5,7 +5,8 @@ Client-facing FastAPI router.
 
 Any device on the network (laptop, raspi, workstation…) can:
   1. POST /client/join   → register + spawn their leading vehicle
-  2. WS   /ws/client/{session_id}  → receive real-time telemetry
+  2. WS   /ws/client/{session_id}  → receive real-time telemetry (closing it keeps the vehicle for the
+     disconnect grace period, decision D4; reconnecting in time resumes the session)
   3. DELETE /client/leave/{session_id}  → graceful exit + despawn
 
 No authentication is required — any device on the LAN can connect.
@@ -20,12 +21,13 @@ import asyncio
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter, Header, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.lidar.config import LidarConfig, lidar_schema
 from src.lidar.manager import LidarError, StreamProfile
+from src.server.roles import AuthError, admin_token_ok
 from src.server.route_utils import on_sim_thread
 
 logger = logging.getLogger(__name__)
@@ -74,7 +76,8 @@ class JoinRequest(BaseModel):
                                    description="CARLA blueprint ID for the leading vehicle")
     duration_seconds: Optional[float] = Field(
         default=None, ge=10, le=86400,
-        description="Session lifetime in seconds. Omit or set null to run until disconnect.",
+        description="Session lifetime in seconds. Omit or set null to run until the client leaves "
+                    "or has had no connection for longer than session_disconnect_grace_s.",
     )
     enable_lidar: bool = Field(
         default=False,
@@ -137,7 +140,7 @@ async def join_server(req: JoinRequest, request: Request):
         raise HTTPException(status_code=500, detail="Could not find a free spawn point")
 
     duration_msg = (
-        f"{int(req.duration_seconds)}s" if req.duration_seconds else "until you disconnect"
+        f"{int(req.duration_seconds)}s" if req.duration_seconds else "until you leave"
     )
 
     lidar_ws_url: Optional[str] = None
@@ -163,9 +166,11 @@ async def join_server(req: JoinRequest, request: Request):
 
 
 @router.delete("/client/leave/{session_id}", summary="Leave the server")
-async def leave_server(session_id: str):
+async def leave_server(session_id: str, x_session_token: Optional[str] = Header(default=None),
+                       x_admin_token: Optional[str] = Header(default=None)):
     """Gracefully end a session and despawn the leading vehicle."""
     _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     session = _world.sessions.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -176,13 +181,16 @@ async def leave_server(session_id: str):
 
 
 @router.get("/client/vehicle/{session_id}", summary="Get vehicle telemetry (REST)")
-async def get_vehicle_state(session_id: str):
+async def get_vehicle_state(session_id: str, x_session_token: Optional[str] = Header(default=None),
+                            x_admin_token: Optional[str] = Header(default=None)):
     """One-shot telemetry poll (for clients that can't use WebSocket)."""
     _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     session = _world.sessions.get_session(session_id)
     if session is None or not session.is_active:
         raise HTTPException(status_code=404, detail="Session not found or ended")
 
+    _world.sessions.touch(session_id)  # a poll is a sign of life for the disconnect grace rule (D4)
     telemetry = _world.get_vehicle_telemetry(session_id)
     if telemetry is None:
         raise HTTPException(status_code=404, detail="Vehicle not found")
@@ -211,6 +219,11 @@ async def client_websocket(websocket: WebSocket, session_id: str):
     The client can send ``"ping"`` to keep the connection alive.
     When the session expires the server sends ``{"type": "session_expired"}``
     and closes the connection.
+
+    Closing the socket does NOT end the session (decision D4): the vehicle is kept for
+    ``session_disconnect_grace_s`` seconds and a reconnect within that time resumes the session.
+    The simulation thread removes it when nobody came back in time. With a grace of 0 the
+    session ends at once, unless another connection (e.g. the hub) still holds it.
     """
     await websocket.accept()
 
@@ -225,6 +238,14 @@ async def client_websocket(websocket: WebSocket, session_id: str):
         await websocket.close()
         return
 
+    try:
+        _check_session_access(session_id, websocket.headers.get("x-session-token"), websocket.headers.get("x-admin-token"))
+    except HTTPException:
+        await websocket.send_json({"type": "error", "message": "X-Session-Token required"})
+        await websocket.close(code=4401)
+        return
+
+    _world.sessions.mark_connected(session_id)
     logger.info("Client WS connected: session=%s (%s)", session_id, session.client_name)
 
     async def _receive_loop():
@@ -269,21 +290,51 @@ async def client_websocket(websocket: WebSocket, session_id: str):
         logger.error("Client WS error for session %s: %s", session_id, exc)
     finally:
         receiver.cancel()
-        # Auto-cleanup on any disconnect
-        if _world is not None:
-            # End the session before the first await: if this task is cancelled while the
-            # despawn is handed to the simulation thread, the session is still marked ended.
-            _world.sessions.end_session(session_id)
-            try:
-                await on_sim_thread(_world, _world.despawn_client_vehicle, session_id)
-            except Exception as exc:  # world may have stopped meanwhile
-                logger.warning("Cleanup of session %s skipped: %s", session_id, exc)
-        logger.info("Auto-cleaned session %s after WS close", session_id)
+        await _client_ws_closed(session_id)
+
+
+async def _client_ws_closed(session_id: str) -> None:
+    """Release this socket's hold on the session; end it at once only when the grace period is 0 (decision D4)."""
+    world = _world  # the module global may be replaced (stop / new connect) while we await
+    if world is None:
+        return
+    world.sessions.mark_disconnected(session_id)
+    session = world.sessions.get_session(session_id)
+    if session is None or not session.is_active:
+        return
+    # grace > 0: the simulation thread removes it if nobody reconnects in time; grace 0: ended here. The despawn is queued
+    # before the first await and shielded: if this task is cancelled the vehicle of an ended session must still be removed.
+    fut = world.end_session_if_unheld(session_id) if hasattr(world, "end_session_if_unheld") else None
+    if fut is None:
+        logger.info("Client WS closed: session=%s kept (grace %.0f s or held by another connection)", session_id,
+                    float(getattr(world, "session_disconnect_grace_s", 0.0)))
+        return
+    try:
+        await asyncio.shield(asyncio.wrap_future(fut))
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # world may have stopped meanwhile
+        logger.warning("Cleanup of session %s skipped: %s", session_id, exc)
 
 
 # ------------------------------------------------------------------ #
 # LiDAR on request — REST                                             #
 # ------------------------------------------------------------------ #
+
+def _check_session_access(session_id: str, session_token: Optional[str], admin_token: Optional[str]) -> None:
+    """With ``client_routes_require_token`` the session id alone is not enough: send this session's ``X-Session-Token`` (or the
+    admin token). Off by default so existing scripts keep working; switch on with PATCH /api/config."""
+    if _world is None or not getattr(_world, "client_routes_require_token", False):
+        return
+    try:
+        if admin_token is not None and admin_token_ok(admin_token):
+            return
+    except AuthError:
+        pass
+    session = _world.sessions.get_by_token(session_token) if isinstance(session_token, str) else None
+    if session is None or session.session_id != session_id:
+        raise HTTPException(status_code=401, detail="this server requires the X-Session-Token of the session (or the admin token)")
+
 
 def _lidar_error_response(exc: LidarError) -> JSONResponse:
     return JSONResponse(status_code=exc.status, content=exc.detail)
@@ -303,7 +354,10 @@ async def lidar_schema_endpoint():
 
 
 @router.get("/client/lidar/{session_id}", summary="State of this session's LiDAR sensor")
-async def get_lidar(session_id: str):
+async def get_lidar(session_id: str, x_session_token: Optional[str] = Header(default=None),
+                    x_admin_token: Optional[str] = Header(default=None)):
+    _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     _active_session(session_id)
     if _world.lidar is None:
         raise HTTPException(status_code=503, detail="LiDAR is not available")
@@ -312,7 +366,10 @@ async def get_lidar(session_id: str):
 
 @router.put("/client/lidar/{session_id}", status_code=202,
             summary="Request or reconfigure this session's LiDAR (applied at the next tick boundary)")
-async def put_lidar(session_id: str, config: LidarConfig = LidarConfig()):
+async def put_lidar(session_id: str, config: LidarConfig = LidarConfig(), x_session_token: Optional[str] = Header(default=None),
+                    x_admin_token: Optional[str] = Header(default=None)):
+    _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     session = _active_session(session_id)
     try:
         info = await on_sim_thread(_world, _world.enable_client_lidar, session_id, config)
@@ -323,7 +380,10 @@ async def put_lidar(session_id: str, config: LidarConfig = LidarConfig()):
 
 
 @router.delete("/client/lidar/{session_id}", status_code=202, summary="Release this session's LiDAR")
-async def delete_lidar(session_id: str):
+async def delete_lidar(session_id: str, x_session_token: Optional[str] = Header(default=None),
+                       x_admin_token: Optional[str] = Header(default=None)):
+    _assert_world_ready()
+    _check_session_access(session_id, x_session_token, x_admin_token)
     session = _active_session(session_id)
     try:
         removed = await on_sim_thread(_world, _world.disable_client_lidar, session_id)
@@ -337,11 +397,12 @@ async def delete_lidar(session_id: str):
 # WebSocket — per-client LiDAR binary stream                         #
 # ------------------------------------------------------------------ #
 
-@router.websocket("/ws/lidar/{session_id}")
-async def lidar_websocket(websocket: WebSocket, session_id: str, max_points: Optional[int] = None,
+# Mounted as WS /ws/lidar/{session_id} by lidar_routes.py, which shares the path with /ws/lidar/{sensor_id}
+# (a session id is a UUID, a sensor id a number); one route for both keeps the match independent of router order.
+async def session_lidar_websocket(websocket: WebSocket, session_id: str, max_points: Optional[int] = None,
                           max_hz: Optional[float] = None, compress: bool = False):
     """
-    Stream LiDAR frames of this session's sensor as binary protocol v3 (``src/lidar/protocol.py``).
+    Stream LiDAR frames of this session's sensor as binary protocol v4 (``src/lidar/protocol.py``).
 
     Query: ``max_points`` (quantised to 10k/25k/50k/all), ``max_hz`` (a divisor of the simulation
     rate), ``compress`` (zlib). Frames are in the SENSOR frame with the sensor pose in the header.

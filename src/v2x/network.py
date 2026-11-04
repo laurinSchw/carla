@@ -141,6 +141,7 @@ class V2XNetwork:
 
         # V2I: RSU registry {intersection_id → RoadSideUnit}
         self._rsus: Dict[int, RoadSideUnit] = {}
+        self._rsus_disabled: Dict[int, RoadSideUnit] = {}  # switched off by the admin: known, not transmitting
 
         # Latest MAP and SPAT per intersection
         self.map_messages:  Dict[int, MAPMessage]  = {}
@@ -695,8 +696,29 @@ class V2XNetwork:
             iid, rsu.config.position[0], rsu.config.position[1],
         )
 
+    def disable_rsu(self, intersection_id: int) -> bool:
+        """Stop an RSU transmitting (it stays known, see ``get_disabled_rsus``). Its last messages and the inboxes drop at the next update."""
+        rsu = self._rsus.pop(intersection_id, None)
+        if rsu is None:
+            return False
+        self._rsus_disabled[intersection_id] = rsu
+        self.map_messages.pop(intersection_id, None)
+        self.spat_messages.pop(intersection_id, None)
+        return True
+
+    def enable_rsu(self, intersection_id: int) -> bool:
+        rsu = self._rsus_disabled.pop(intersection_id, None)
+        if rsu is None:
+            return False
+        self._rsus[intersection_id] = rsu
+        return True
+
+    def get_disabled_rsus(self) -> Dict[int, RoadSideUnit]:
+        return dict(self._rsus_disabled)
+
     def unregister_rsu(self, intersection_id: int) -> None:
         """Remove an RSU from the network."""
+        self._rsus_disabled.pop(intersection_id, None)
         self._rsus.pop(intersection_id, None)
         self.map_messages.pop(intersection_id, None)
         self.spat_messages.pop(intersection_id, None)

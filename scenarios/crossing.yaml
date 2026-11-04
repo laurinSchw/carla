@@ -1,0 +1,19 @@
+# A short fake-world scenario that touches every kind of command. Run it with:
+#   python -m src.cli run scenarios/crossing.yaml --runs-dir /tmp/runs
+# (fake: true below: no CARLA needed; the data is synthetic, see src/testing/fake_carla)
+name: crossing
+seed: 7
+fake: true
+duration_frames: 400
+config:
+  awareness_range_m: 75
+spawn:
+  vehicles: 12
+  pedestrians: 4
+record: [links, raw_lidar]
+commands:
+  - {frame: 60, action: inject_denm, x: 100, y: 100, cause_code: ACCIDENT, relevance_distance_m: 200, duration_s: 5}
+  - {frame: 100, action: lidar_request, vehicle: first, record_raw: true, config: {points_per_second: 40000}}
+  - {frame: 200, action: rsu, station_id: -5, enabled: false}
+  - {frame: 300, action: set_config, changes: {awareness_range_m: 50}}
+  - {frame: 340, action: lidar_release, sensor: 1}

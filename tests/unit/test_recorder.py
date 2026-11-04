@@ -97,6 +97,9 @@ def test_lidar_frames_are_recorded_at_full_resolution_and_decode(tmp_path):
     assert header.num_points == 5000 and np.array_equal(got["x"], pts["x"]) and header.frame == 105
     meta = lines(r.path / "lidar_meta.jsonl")[0]
     assert meta["num_points"] == 5000 and meta["file"] == "lidar/3/105.bin"
+    # the field-bit layout changed under the same version number (2026-11-03): the manifest names it
+    assert json.loads((r.path / "manifest.json").read_text())["lidar_protocol"] == {
+        "version": protocol.VERSION, "field_layout": protocol.FIELD_LAYOUT_ID}
 
 
 def test_lidar_is_not_recorded_unless_asked(tmp_path):
