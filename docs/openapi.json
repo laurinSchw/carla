@@ -1158,7 +1158,7 @@
     },
     "/admin/map": {
       "post": {
-        "description": "Load another map and restart the world with the same configuration. Sessions, LiDAR sensors, spawned traffic and an\nopen run end, exactly as with ``/connect``. 422 for a map the CARLA server does not have, 409 while a connect runs.",
+        "description": "Load another map and restart the world with the same configuration. ``load_world`` replaces the world on the CARLA\nserver: actors of other users on it are destroyed too (the lab world is shared). Sessions, LiDAR sensors, spawned traffic and an\nopen run end, exactly as with ``/connect``. 422 for a map the CARLA server does not have, 409 while a connect runs.",
         "operationId": "change_map_admin_map_post",
         "parameters": [
           {

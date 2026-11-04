@@ -55,7 +55,7 @@ async def _revalidate_frontend(request: Request, call_next):
     (ETag) instead of showing an old admin page after an update."""
     response = await call_next(request)
     path = request.url.path
-    if path == "/" or path.startswith(("/static/", "/admin", "/observer", "/vehicle")) and "application/json" not in response.headers.get("content-type", ""):
+    if path in ("/", "/admin", "/observer", "/vehicle") or path.startswith("/static/"):
         response.headers.setdefault("Cache-Control", "no-cache")
     return response
 

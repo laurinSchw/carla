@@ -80,7 +80,7 @@ class WorldConfig(BaseModel):
 
     # Map to load on connect, e.g. "Town03" (any entry of the CARLA server's available maps; the name may be given without the
     # path). None = use whatever map the CARLA server has loaded. Changing it needs a new world: POST /admin/map.
-    map_name: Optional[str] = None
+    map_name: Optional[str] = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_./-]+$")
 
     # Pace the simulation to wall-clock time (True) or tick as fast as possible (False: headless runs)
     realtime: bool = True

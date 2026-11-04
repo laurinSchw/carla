@@ -1,8 +1,9 @@
 // Options of the map selects (Connection card and connect dialog). Pure, so it is tested without a DOM.
 
 // Maps of a default CARLA 0.9.16 install; shown until the server tells us what it really has (GET /admin/maps).
+// Unverified for other installs: the lab server lacks Town06/07, a map the server does not have is refused with the list it has.
 export const FALLBACK_MAPS = ['Town01', 'Town01_Opt', 'Town02', 'Town02_Opt', 'Town03', 'Town03_Opt', 'Town04', 'Town04_Opt',
-  'Town05', 'Town05_Opt', 'Town10HD', 'Town10HD_Opt'];
+  'Town05', 'Town05_Opt', 'Town06', 'Town06_Opt', 'Town07', 'Town07_Opt', 'Town10HD', 'Town10HD_Opt'];
 
 const lastPart = (m) => String(m || '').split('/').filter(Boolean).pop() || '';
 

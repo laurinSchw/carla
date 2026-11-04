@@ -81,6 +81,9 @@ async function showAdmin() {
 
 // ── connection ──────────────────────────────────────────────────────────────────────────────────
 let lastConnectState = null;
+let reloadWhenUp = false;       // set by Connect / Load map; the reload needs the server to REPORT "connecting" first, then "running"
+let sawConnecting = false;
+let lastElapsed = null;
 
 async function connectionCard() {
   async function refresh() {
@@ -89,7 +92,12 @@ async function connectionCard() {
       $('conn-state').textContent = s.connected ? `${s.connect_state}${s.running ? ' (running)' : ''}` : s.connect_state;
       $('conn-state').className = `badge state-${s.connect_state === 'running' ? 'active' : s.connect_state === 'error' ? 'error' : 'requested'}`;
       $('conn-error').textContent = s.connect_error || '';
-      if (lastConnectState === 'connecting' && s.connect_state === 'running') location.reload();    // new world: new hub
+      if (s.connect_state === 'connecting') sawConnecting = true;
+      if (s.connect_state === 'error') reloadWhenUp = false;
+      // a quick restart can fall between two polls: a world whose uptime went backwards is a new world as well
+      const restarted = lastElapsed !== null && s.elapsed_seconds < lastElapsed;
+      lastElapsed = s.running ? s.elapsed_seconds : null;
+      if (reloadWhenUp && s.connect_state === 'running' && (sawConnecting || restarted)) location.reload();    // new world: new hub
       lastConnectState = s.connect_state;
       updateMapForm(s);
       if (!asked && (s.connect_state === 'idle' || s.connect_state === 'error') && !s.running) promptForEndpoint();
@@ -104,7 +112,7 @@ async function connectionCard() {
       await api.post('/admin/connect', body);
       try { localStorage.setItem('carla.endpoint', JSON.stringify({ host, port })); } catch { /* storage may be blocked */ }
       toast('Connecting… the page reloads when the world is up.', 'info');
-      lastConnectState = 'connecting';
+      reloadWhenUp = true; sawConnecting = false;
       return true;
     } catch { return false; /* the error toast is shown */ } finally { refresh(); }
   }
@@ -141,11 +149,11 @@ async function connectionCard() {
   $('map-btn').addEventListener('click', async () => {
     const map = $('cn-map').value.trim();
     if (!map) { toast('Pick a map first ("keep current" changes nothing).', 'info'); return; }
-    if (!confirm(`Load ${map}? The world restarts: sessions, sensors, spawned traffic and the run end.`)) return;
+    if (!confirm(`Load ${map}? The world restarts: sessions, sensors, spawned traffic and the run end. CARLA replaces the whole world, so actors of other users on this server are removed too.`)) return;
     try {
       await api.post('/admin/map', { map_name: map });
       toast(`Loading ${map}… the page reloads when the world is up.`, 'info');
-      lastConnectState = 'connecting';
+      reloadWhenUp = true; sawConnecting = false;
       mapsLoaded = false;
     } catch { /* shown */ }
     refresh();
