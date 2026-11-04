@@ -2,6 +2,7 @@
 // sessions, LiDAR management and WebSocket health. The token lives in this tab (sessionStorage) and goes in a header.
 
 import { createApp, renderTopbar, showFakeBanner, credentials } from './app.js';
+import { mapOptions } from './map-options.js';
 import { initObserver } from './observer-core.js';
 import { LidarConfigForm } from './lidar-controls.js';
 import { fieldsFromJsonSchema, renderForm, readForm, validateAll, valuesToConfig, configToValues } from './schema-form.js';
@@ -113,23 +114,34 @@ async function connectionCard() {
   });
   // Map: the field is always there (Connect uses it); with a running world the list comes from the CARLA server and Load map works
   let mapsLoaded = false;
-  const lastPart = (m) => String(m || '').split('/').pop();
+  function fillMapSelects(available, current) {
+    for (const id of ['cn-map', 'cd-map']) {
+      const sel = $(id);
+      const keep = sel.value;
+      sel.textContent = '';
+      for (const o of mapOptions(available, current, keep)) {
+        const opt = el('option', '', o.label);
+        opt.value = o.value;
+        opt.selected = o.selected;
+        sel.appendChild(opt);
+      }
+    }
+  }
+  fillMapSelects(null, '');                       // before a world runs: the standard CARLA maps
   async function updateMapForm(s) {
     $('map-btn').disabled = !s.running;
-    if (!s.running) { mapsLoaded = false; return; }
+    if (!s.running) { if (mapsLoaded) fillMapSelects(null, ''); mapsLoaded = false; return; }
     if (mapsLoaded) return;
     mapsLoaded = true;
     try {
       const r = await api.get('/admin/maps', { quiet: true });
-      const list = $('maps-list');
-      list.textContent = '';
-      for (const m of r.maps) { const o = el('option'); o.value = m; list.appendChild(o); }
-      if (!$('cn-map').value) $('cn-map').value = lastPart(r.current);
+      fillMapSelects(r.maps, r.current);
     } catch { mapsLoaded = false; }
   }
   $('map-btn').addEventListener('click', async () => {
     const map = $('cn-map').value.trim();
-    if (!map || !confirm(`Load ${map}? The world restarts: sessions, sensors, spawned traffic and the run end.`)) return;
+    if (!map) { toast('Pick a map first ("keep current" changes nothing).', 'info'); return; }
+    if (!confirm(`Load ${map}? The world restarts: sessions, sensors, spawned traffic and the run end.`)) return;
     try {
       await api.post('/admin/map', { map_name: map });
       toast(`Loading ${map}… the page reloads when the world is up.`, 'info');
