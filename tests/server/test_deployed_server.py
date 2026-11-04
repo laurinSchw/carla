@@ -130,19 +130,17 @@ def test_websocket_telemetry_stream(live_world, record_property):
 
 
 @pytest.mark.carla
-def test_websocket_close_cleans_up_session(live_world):
+def test_websocket_close_keeps_session_during_grace_then_leave_cleans_up(live_world):
     sync = pytest.importorskip("websockets.sync.client")
     _, j = live_world.json("POST", "/client/join", {"client_name": "pytest-cleanup"})
     sid = j["session_id"]
     with sync.connect(live_world.ws_base + j["ws_url"], open_timeout=10) as ws:
         ws.recv(timeout=5)
-    for _ in range(30):
-        if live_world.json("GET", f"/client/vehicle/{sid}")[0] == 404:
-            break
-        time.sleep(0.2)
-    else:
-        live_world.json("DELETE", f"/client/leave/{sid}")
-        pytest.fail("session still active 6 s after the websocket closed")
+    # decision D4: closing the socket keeps the session for session_disconnect_grace_s (default 30 s); leaving ends it at once
+    time.sleep(1.0)
+    assert live_world.json("GET", f"/client/vehicle/{sid}")[0] == 200, "session was removed although the grace period has not passed"
+    assert live_world.json("DELETE", f"/client/leave/{sid}")[0] == 200
+    assert live_world.json("GET", f"/client/vehicle/{sid}")[0] == 404
 
 
 @pytest.mark.carla
