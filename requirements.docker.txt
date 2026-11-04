@@ -1,4 +1,4 @@
-# Docker requirements for CARLA V2V Platform
+# Docker requirements for CARLA V2X Platform
 # Full installation including CARLA Python client
 
 # CARLA Python client - connects to remote CARLA server

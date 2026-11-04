@@ -1,4 +1,4 @@
-# CARLA V2V Research Platform
+# CARLA V2X Research Platform
 
 ### Before setting up the Framework Install Carla
 

@@ -1,4 +1,4 @@
-# CARLA V2V Research Platform - Docker Compose
+# CARLA V2X Research Platform - Docker Compose
 #
 # Usage:
 #   docker-compose up -d        # Start in background
@@ -17,7 +17,7 @@ services:
       #  HTTP_PROXY: "http://172.18.167.75:81"
       #  HTTPS_PROXY: "http://172.18.167.75:81"
         NO_PROXY: "localhost,127.0.0.1"
-    container_name: carla-v2v-frontend
+    container_name: carla-v2x-frontend
     ports:
       - "8000:8000"
     volumes:
@@ -40,4 +40,4 @@ services:
 
 networks:
   default:
-    name: carla-v2v-network
+    name: carla-v2x-network
