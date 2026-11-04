@@ -14,6 +14,15 @@ from tests.unit.test_hub_views import _wait  # noqa: E402
 
 
 @pytest.fixture
+def admin_globals():
+    """Route tests set admin_routes' module state directly: save it and restore it so no test leaks into the next."""
+    import src.server.admin_routes as admin_mod
+    saved = (admin_mod._world, admin_mod._connect_state, admin_mod._connect_error)
+    yield admin_mod
+    admin_mod._world, admin_mod._connect_state, admin_mod._connect_error = saved
+
+
+@pytest.fixture
 def api(monkeypatch, tmp_path):
     monkeypatch.setenv("ADMIN_TOKEN", "tok")
     rec = Recorder()
@@ -110,7 +119,7 @@ def test_map_geometry_builder():
     assert geom["lanes"][0][0] == [0.0, 0.0] and geom["lanes"][0][-1] == [10.0, 0.0] and len(geom["version"]) == 16
 
 
-def test_map_list_and_change_restarts_the_world_on_the_new_map(api, monkeypatch):
+def test_map_list_and_change_restarts_the_world_on_the_new_map(api, monkeypatch, admin_globals):
     import time
     import src.server.admin_routes as admin_mod
     c, h, srv = api
@@ -146,7 +155,7 @@ def test_connect_with_a_map_name_loads_it_and_an_unknown_map_fails(api):
         bad.start()
 
 
-def test_map_switch_conflicts_and_bad_names_do_not_cost_the_running_world(api):
+def test_map_switch_conflicts_and_bad_names_do_not_cost_the_running_world(api, admin_globals):
     import src.server.admin_routes as admin_mod
     c, h, srv = api
     admin_mod._world = srv
@@ -158,7 +167,8 @@ def test_map_switch_conflicts_and_bad_names_do_not_cost_the_running_world(api):
         if admin_mod._connect_state != "connecting":
             break
         time.sleep(0.1)
-    assert admin_mod._connect_state == "error" and "not available" in admin_mod._connect_error
+    # nothing was stopped: the healthy world stays "running" (no red error on a running world), the reason is still reported
+    assert admin_mod._connect_state == "running" and "not available" in admin_mod._connect_error
     assert admin_mod._world is srv and srv._running, "the working world was stopped by a bad map name"
     # while a connect runs, /admin/map answers 409 (not 503)
     admin_mod._connect_state = "connecting"
@@ -168,3 +178,20 @@ def test_map_switch_conflicts_and_bad_names_do_not_cost_the_running_world(api):
         admin_mod._connect_state = "idle"
     # the name is constrained
     assert c.post("/admin/connect", json={"carla_host": "stub", "map_name": "../x y"}, headers=h).status_code == 422
+
+
+def test_map_routes_same_map_is_a_noop_and_a_stopped_world_is_409(api, admin_globals):
+    admin_mod = admin_globals
+    c, h, srv = api
+    admin_mod._world = srv
+    admin_mod._connect_state = "running"
+    current = srv.get_status()["map"]
+    r = c.post("/admin/map", json={"map_name": srv.short_map_name(current)}, headers=h)
+    assert r.status_code == 200 and r.json()["changed"] is False
+    assert admin_mod._world is srv and srv._running, "loading the current map restarted the world"
+    srv._running = False
+    try:
+        assert c.get("/admin/maps", headers=h).status_code == 409
+        assert c.post("/admin/map", json={"map_name": "Town03"}, headers=h).status_code == 409
+    finally:
+        srv._running = True
