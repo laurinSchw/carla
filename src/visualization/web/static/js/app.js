@@ -54,6 +54,7 @@ export function createApp({ role = 'observer' } = {}) {
   hub.onState = (state, detail) => store.setConnection(state, detail);
   hub.onError = (m) => {
     store.lastError = m;
+    if (m.code === 'not_ready') return;      // no world yet (before /admin/connect): expected, the page reloads when it is up
     toastError(`${m.code}: ${m.message}`);
   };
   const app = {

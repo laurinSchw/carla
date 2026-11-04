@@ -90,16 +90,46 @@ async function connectionCard() {
       $('conn-error').textContent = s.connect_error || '';
       if (lastConnectState === 'connecting' && s.connect_state === 'running') location.reload();    // new world: new hub
       lastConnectState = s.connect_state;
+      if (!asked && (s.connect_state === 'idle' || s.connect_state === 'error') && !s.running) promptForEndpoint();
     } catch { /* the toast of a failed poll would be noise */ }
+  }
+  async function connectWorld(host, port) {
+    const body = { carla_host: host, carla_port: port, tm_port: Number($('cn-tm').value),
+      v2x_enabled: $('cn-v2x').checked, v2x_update_rate_hz: Number($('cn-rate').value) };
+    if ($('cn-rsu').value !== '') body.rsu_max_count = Number($('cn-rsu').value);
+    try {
+      await api.post('/admin/connect', body);
+      try { localStorage.setItem('carla.endpoint', JSON.stringify({ host, port })); } catch { /* storage may be blocked */ }
+      toast('Connecting… the page reloads when the world is up.', 'info');
+      lastConnectState = 'connecting';
+      return true;
+    } catch { return false; /* the error toast is shown */ } finally { refresh(); }
   }
   $('connect-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const body = { carla_host: $('cn-host').value, carla_port: Number($('cn-port').value), tm_port: Number($('cn-tm').value),
-      v2x_enabled: $('cn-v2x').checked, v2x_update_rate_hz: Number($('cn-rate').value) };
-    if ($('cn-rsu').value !== '') body.rsu_max_count = Number($('cn-rsu').value);
-    try { await api.post('/admin/connect', body); toast('Connecting… the page reloads when the world is up.', 'info'); lastConnectState = 'connecting'; } catch { /* shown */ }
-    refresh();
+    await connectWorld($('cn-host').value, Number($('cn-port').value));
   });
+  // No world yet: ask for the CARLA address (once per page load; "Later" leaves it to the Connection card)
+  let asked = false;
+  function promptForEndpoint() {
+    asked = true;
+    let last = null;
+    try { last = JSON.parse(localStorage.getItem('carla.endpoint') || 'null'); } catch { /* ignore */ }
+    if (last && last.host) { $('cd-host').value = last.host; $('cd-port').value = last.port || 2000; $('cn-host').value = last.host; $('cn-port').value = last.port || 2000; }
+    const dlg = $('connect-dialog');
+    if (typeof dlg.showModal === 'function') dlg.showModal();
+    $('cd-host').focus();
+  }
+  $('connect-dialog-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const host = $('cd-host').value.trim();
+    const port = Number($('cd-port').value);
+    if (!host || !(port >= 1 && port <= 65535)) { $('cd-error').textContent = 'Enter a host and a port between 1 and 65535.'; return; }
+    $('cd-error').textContent = '';
+    $('cn-host').value = host; $('cn-port').value = port;
+    if (await connectWorld(host, port)) $('connect-dialog').close();
+  });
+  $('cd-skip').addEventListener('click', () => $('connect-dialog').close());
   $('disconnect-btn').addEventListener('click', async () => {
     if (!confirm('Stop the world? Sessions, sensors and everything the server spawned are removed.')) return;
     try { await api.post('/admin/stop'); toast('Shutdown started.', 'info'); } catch { /* shown */ }
